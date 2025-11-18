@@ -133,20 +133,26 @@
           on:moodSaved={handleMoodSaved}
         />
       </div>
-    {:else if currentView === 'chat'}
-      <div class="chat-view">
-        <ChatInterface 
-          {diaryContext} 
-          includeTodayEntry={includeTodayEntry}
-          todayEntry={todayEntryText}
-        />
-      </div>
-    {:else if currentView === 'insights'}
+    {/if}
+    
+    <!-- Keep ChatInterface mounted but hidden when not active -->
+    <div class="chat-view" class:hidden={currentView !== 'chat'}>
+      <ChatInterface 
+        bind:this={chatInterfaceRef}
+        {diaryContext} 
+        includeTodayEntry={includeTodayEntry}
+        todayEntry={todayEntryText}
+      />
+    </div>
+    
+    {#if currentView === 'insights'}
       <div class="insights-view">
         <EmotionalInsights bind:this={insightsRef} />
         <ConnectionReminders />
       </div>
-    {:else if currentView === 'favorites'}
+    {/if}
+    
+    {#if currentView === 'favorites'}
       <div class="favorites-view">
         <FavoritesView bind:this={favoritesRef} />
       </div>
@@ -254,6 +260,10 @@
     flex-direction: column;
     min-height: 0;
     overflow-y: auto;
+  }
+
+  .chat-view.hidden {
+    display: none;
   }
 
   .insights-view,

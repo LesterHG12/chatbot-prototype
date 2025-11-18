@@ -4,6 +4,7 @@
   import JournalPrompts from './JournalPrompts.svelte';
   import { MetricsCollector } from '../metrics/MetricsCollector.js';
   import { DiaryStore } from '../diary/DiaryStore.js';
+  import { ChatStore } from '../chat/ChatStore.js';
   
   export let diaryContext = '';
   export let includeTodayEntry = false; // Option to include today's entry explicitly
@@ -21,9 +22,15 @@
   let selectedEntryDate = '';
   let selectedEntryText = '';
   let selectedCategory = 'daily';
+  let currentSessionId = null;
+  let showChatHistory = false;
+  let chatSessions = [];
+  let deletingSessionId = null; // Track which session is being deleted
+  let abortController = null; // Track current fetch request for cancellation
   
   const metricsCollector = new MetricsCollector();
   const diaryStore = new DiaryStore();
+  const chatStore = new ChatStore();
 
   function loadAvailableEntries() {
     const allEntries = diaryStore.getAllEntries();
@@ -88,12 +95,161 @@
     showDiaryContext = true;
   }
 
-  // Initialize greeting on mount
-  onMount(() => {
-    if (messages.length === 0) {
+  // Load current session or create new one
+  function loadCurrentSession() {
+    const session = chatStore.getOrCreateCurrentSession();
+    if (session) {
+      currentSessionId = session.id;
+      messages = session.messages || [];
+      
+      // If no messages, add greeting
+      if (messages.length === 0) {
+        const greeting = getInitialGreeting();
+        messages = [{ role: 'assistant', content: greeting }];
+        chatStore.setMessages(currentSessionId, messages);
+      }
+      
+      // Restore session context if available
+      if (session.diaryContext) {
+        diaryContext = session.diaryContext;
+      }
+      if (session.includeTodayEntry !== undefined) {
+        includeTodayEntry = session.includeTodayEntry;
+      }
+    }
+    refreshChatSessions();
+  }
+
+  // Check if a session has any user messages (not just the greeting)
+  function hasUserMessages(session) {
+    if (!session.messages || session.messages.length === 0) return false;
+    return session.messages.some(msg => msg.role === 'user');
+  }
+
+  // Refresh the list of chat sessions (filter out empty ones)
+  function refreshChatSessions() {
+    const allSessions = chatStore.getAllSessions();
+    // Only show sessions that have at least one user message
+    chatSessions = allSessions.filter(session => hasUserMessages(session));
+  }
+
+  // Switch to a different chat session
+  function switchToSession(sessionId) {
+    const session = chatStore.getSession(sessionId);
+    if (session) {
+      // Cancel any in-progress request when switching sessions
+      if (abortController && isLoading) {
+        abortController.abort();
+        abortController = null;
+        isLoading = false;
+      }
+      
+      // Save current session before switching
+      if (currentSessionId) {
+        chatStore.updateSession(currentSessionId, {
+          diaryContext,
+          includeTodayEntry
+        });
+      }
+      
+      currentSessionId = sessionId;
+      chatStore.setCurrentSessionId(sessionId);
+      messages = session.messages || [];
+      
+      if (messages.length === 0) {
+        const greeting = getInitialGreeting();
+        messages = [{ role: 'assistant', content: greeting }];
+        chatStore.setMessages(currentSessionId, messages);
+      }
+      
+      diaryContext = session.diaryContext || '';
+      includeTodayEntry = session.includeTodayEntry || false;
+      showChatHistory = false;
+    }
+  }
+
+  // Create a new chat session
+  function createNewSession() {
+    // Cancel any in-progress request when creating new session
+    if (abortController && isLoading) {
+      abortController.abort();
+      abortController = null;
+      isLoading = false;
+    }
+    
+    // Save current session before creating new one
+    if (currentSessionId) {
+      chatStore.updateSession(currentSessionId, {
+        diaryContext,
+        includeTodayEntry
+      });
+    }
+    
+    const session = chatStore.createSession();
+    if (session) {
+      currentSessionId = session.id;
+      messages = [];
       const greeting = getInitialGreeting();
       messages = [{ role: 'assistant', content: greeting }];
+      chatStore.setMessages(currentSessionId, messages);
+      diaryContext = '';
+      includeTodayEntry = false;
+      showChatHistory = false;
+      refreshChatSessions();
     }
+  }
+
+  // Start delete confirmation for a chat session
+  function startDeleteSession(sessionId, event) {
+    if (event) {
+      event.stopPropagation();
+    }
+    deletingSessionId = sessionId;
+  }
+
+  // Cancel delete
+  function cancelDelete(event) {
+    if (event) {
+      event.stopPropagation();
+    }
+    deletingSessionId = null;
+  }
+
+  // Confirm and delete a chat session
+  function confirmDeleteSession(sessionId, event) {
+    if (event) {
+      event.stopPropagation();
+    }
+    
+    // If deleting the current session and there's a request in progress, cancel it
+    if (sessionId === currentSessionId && abortController && isLoading) {
+      abortController.abort();
+      abortController = null;
+      isLoading = false;
+      errorMsg = 'Request cancelled';
+    }
+    
+    chatStore.deleteSession(sessionId);
+    refreshChatSessions();
+    deletingSessionId = null;
+    
+    // If deleting current session, create a new one
+    if (sessionId === currentSessionId) {
+      createNewSession();
+    }
+  }
+
+  // Toggle chat history sidebar
+  function toggleChatHistory() {
+    if (!showChatHistory) {
+      refreshChatSessions();
+    }
+    showChatHistory = !showChatHistory;
+  }
+
+  // Initialize greeting on mount
+  onMount(() => {
+    loadCurrentSession();
   });
 
   function getInitialGreeting() {
@@ -131,9 +287,18 @@
 
     // Add user message
     messages = [...messages, { role: 'user', content }];
+    
+    // Persist user message immediately
+    if (currentSessionId) {
+      chatStore.setMessages(currentSessionId, messages);
+    }
+    
     input = '';
     isLoading = true;
     errorMsg = '';
+
+    // Create AbortController for this request
+    abortController = new AbortController();
 
     try {
       // Build diary context - include today's entry if requested
@@ -153,18 +318,35 @@
           history: messages,
           diaryContext: contextToSend
           // Mode is determined automatically by orchestrator based on metrics
-        })
+        }),
+        signal: abortController.signal
       });
 
+      // Check if request was aborted
+      if (abortController.signal.aborted) {
+        return;
+      }
+
       const data = await res.json();
+
+      // Check again if request was aborted after JSON parsing
+      if (abortController.signal.aborted) {
+        return;
+      }
 
       if (!res.ok || data?.error) {
         errorMsg = data?.error || 'Request failed';
         isLoading = false;
+        abortController = null;
         return;
       }
 
       if (data.assistantMessage) {
+        // Check one more time if request was aborted before updating UI
+        if (abortController.signal.aborted) {
+          return;
+        }
+
         messages = [...messages, { role: 'assistant', content: data.assistantMessage }];
         replierInput = data.replierInput || null;
         
@@ -177,12 +359,31 @@
         if (data.replierInput?.metrics) {
           metricsCollector.saveMetricsHistory(data.replierInput.metrics);
         }
+        
+        // Persist messages to store
+        if (currentSessionId) {
+          chatStore.setMessages(currentSessionId, messages);
+          chatStore.updateSession(currentSessionId, {
+            diaryContext,
+            includeTodayEntry
+          });
+        }
       }
     } catch (err) {
+      // Don't show error if request was aborted
+      if (err.name === 'AbortError') {
+        // Request was cancelled, clean up silently
+        isLoading = false;
+        abortController = null;
+        return;
+      }
       errorMsg = 'Failed to send message. Please try again.';
       console.error('Chat error:', err);
     } finally {
-      isLoading = false;
+      if (!abortController?.signal.aborted) {
+        isLoading = false;
+        abortController = null;
+      }
     }
   }
 
@@ -191,7 +392,7 @@
   }
 </script>
 
-<div class="chat-container">
+<div class="chat-container" class:sidebar-open={showChatHistory}>
   <div class="chat-header">
       <div class="header-row">
         <div class="mode-indicator">
@@ -202,6 +403,20 @@
           {/if}
         </div>
         <div class="header-actions">
+        <button 
+          class="chat-history-btn"
+          on:click={toggleChatHistory}
+          title="View previous chats"
+        >
+          💬 Chat History
+        </button>
+        <button 
+          class="new-chat-btn"
+          on:click={createNewSession}
+          title="Start a new chat"
+        >
+          ➕ New Chat
+        </button>
         <button 
           class="import-diary-btn"
           on:click={toggleImportDiary}
@@ -251,6 +466,75 @@
       {errorMsg}
     </div>
   {/if}
+
+  <div class="chat-history-sidebar" class:open={showChatHistory}>
+    <div class="chat-history-content">
+      <div class="history-header">
+        <h3>💬 Chat History</h3>
+        <button class="close-history" on:click={toggleChatHistory} type="button">×</button>
+      </div>
+      <div class="sessions-list">
+        {#if chatSessions.length > 0}
+          {#each chatSessions as session}
+            <div 
+              class="session-item"
+              class:active={session.id === currentSessionId}
+              class:deleting={deletingSessionId === session.id}
+              on:click={() => deletingSessionId !== session.id && switchToSession(session.id)}
+            >
+              <div class="session-info">
+                <div class="session-title">{session.title}</div>
+                <div class="session-date">{chatStore.formatDate(session.lastUpdated)}</div>
+                <div class="session-preview">
+                  {#if session.messages && session.messages.length > 0}
+                    {@const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user')}
+                    {#if lastUserMsg}
+                      {lastUserMsg.content.substring(0, 60)}{lastUserMsg.content.length > 60 ? '...' : ''}
+                    {:else}
+                      {session.messages.length} message{session.messages.length !== 1 ? 's' : ''}
+                    {/if}
+                  {:else}
+                    Empty chat
+                  {/if}
+                </div>
+              </div>
+              {#if deletingSessionId === session.id}
+                <div class="delete-confirmation">
+                  <span class="delete-text">Delete?</span>
+                  <button 
+                    class="confirm-delete-btn"
+                    on:click={(e) => confirmDeleteSession(session.id, e)}
+                    title="Confirm delete"
+                  >
+                    ✓
+                  </button>
+                  <button 
+                    class="cancel-delete-btn"
+                    on:click={(e) => cancelDelete(e)}
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                </div>
+              {:else}
+                <button 
+                  class="delete-session-btn"
+                  on:click={(e) => startDeleteSession(session.id, e)}
+                  title="Delete this chat"
+                >
+                  🗑️
+                </button>
+              {/if}
+            </div>
+          {/each}
+        {:else}
+          <div class="no-sessions">
+            <p>No previous chats. Start a conversation!</p>
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
 
   {#if showImportDiary}
     <div class="import-diary-modal">
@@ -338,6 +622,22 @@
       0 8px 24px rgba(0, 0, 0, 0.08),
       inset 0 1px 0 rgba(255, 255, 255, 0.8);
     overflow: hidden;
+    position: relative;
+    transition: margin-left 0.3s ease;
+  }
+
+  .chat-container.sidebar-open {
+    margin-left: 320px;
+  }
+
+  @media (max-width: 768px) {
+    .chat-container.sidebar-open {
+      margin-left: 0;
+    }
+    
+    .chat-history-sidebar {
+      width: 280px;
+    }
   }
 
   .chat-header {
@@ -389,6 +689,29 @@
     display: flex;
     gap: 0.5rem;
     align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .chat-history-btn,
+  .new-chat-btn {
+    padding: 0.5rem 1rem;
+    border: 2px solid rgba(107, 87, 67, 0.5);
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.15) 0%, rgba(107, 87, 67, 0.15) 100%);
+    color: #4a3728;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .chat-history-btn:hover,
+  .new-chat-btn:hover {
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.25) 0%, rgba(107, 87, 67, 0.25) 100%);
+    border-color: rgba(107, 87, 67, 0.7);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   }
 
   .import-diary-btn {
@@ -796,6 +1119,219 @@
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
+  }
+
+  .chat-history-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 320px;
+    background: linear-gradient(135deg, #fffef9 0%, #fff9f0 100%);
+    border-right: 2px solid rgba(139, 115, 85, 0.3);
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.1);
+    z-index: 999;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .chat-history-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .chat-history-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 2px solid rgba(139, 115, 85, 0.2);
+    background: linear-gradient(135deg, rgba(255, 248, 240, 0.8) 0%, rgba(255, 245, 230, 0.8) 100%);
+  }
+
+  .history-header h3 {
+    margin: 0;
+    color: #4a3728;
+    font-size: 1.25rem;
+    font-weight: 650;
+  }
+
+  .close-history {
+    background: transparent;
+    border: none;
+    font-size: 2rem;
+    color: #6b5743;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    transition: background 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .close-history:hover {
+    background: rgba(107, 87, 67, 0.1);
+  }
+
+  .sessions-list {
+    padding: 1rem;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .session-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border: 2px solid rgba(139, 115, 85, 0.3);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+
+  .session-item:hover:not(.deleting) {
+    background: rgba(255, 255, 255, 1);
+    border-color: rgba(139, 115, 85, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .session-item.active {
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.2) 0%, rgba(107, 87, 67, 0.2) 100%);
+    border-color: #8b7355;
+    box-shadow: 0 4px 12px rgba(139, 115, 85, 0.2);
+  }
+
+  .session-item.deleting {
+    background: rgba(254, 242, 242, 0.9);
+    border-color: rgba(220, 38, 38, 0.4);
+    cursor: default;
+  }
+
+  .session-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .session-title {
+    font-weight: 650;
+    font-size: 0.95rem;
+    color: #8b7355;
+    margin-bottom: 0.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .session-date {
+    font-size: 0.8rem;
+    color: #6b5743;
+    margin-bottom: 0.5rem;
+  }
+
+  .session-preview {
+    font-size: 0.85rem;
+    color: #4a3728;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .delete-session-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.2rem;
+    color: #6b5743;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+
+  .delete-session-btn:hover {
+    background: rgba(220, 38, 38, 0.1);
+    color: #dc2626;
+    opacity: 1;
+  }
+
+  .delete-confirmation {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .delete-text {
+    font-size: 0.85rem;
+    color: #dc2626;
+    font-weight: 600;
+    margin-right: 0.25rem;
+  }
+
+  .confirm-delete-btn,
+  .cancel-delete-btn {
+    background: transparent;
+    border: 2px solid rgba(139, 115, 85, 0.3);
+    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+    padding: 0;
+  }
+
+  .confirm-delete-btn {
+    color: #dc2626;
+    border-color: rgba(220, 38, 38, 0.4);
+  }
+
+  .confirm-delete-btn:hover {
+    background: rgba(220, 38, 38, 0.1);
+    border-color: #dc2626;
+  }
+
+  .cancel-delete-btn {
+    color: #6b5743;
+  }
+
+  .cancel-delete-btn:hover {
+    background: rgba(107, 87, 67, 0.1);
+    border-color: rgba(107, 87, 67, 0.5);
+  }
+
+  .no-sessions {
+    text-align: center;
+    padding: 2rem;
+    color: #6b5743;
+    font-style: italic;
   }
 </style>
 
