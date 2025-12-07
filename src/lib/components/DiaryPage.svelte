@@ -786,15 +786,7 @@
 
   .diary-page {
     flex: 1;
-    background: 
-      repeating-linear-gradient(
-        0deg,
-        #faf8f3 0px,
-        #faf8f3 24px,
-        #e8e6e0 24px,
-        #e8e6e0 25px
-      ),
-      linear-gradient(to bottom, #fffef9 0%, #faf8f3 100%);
+    background: linear-gradient(to bottom, #fffef9 0%, #faf8f3 100%);
     box-shadow: 
       inset 0 0 30px rgba(0, 0, 0, 0.05),
       2px 2px 10px rgba(0, 0, 0, 0.1);
