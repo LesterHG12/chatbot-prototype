@@ -5,6 +5,7 @@
   export let selectedCategory = 'daily';
   export let onCategoryChange = null; // Function to call when category changes
   export let showLabels = false; // Whether to show category labels (true for chat, false for diary)
+  export let showRandomButton = true; // Whether to show the random button (false for diary mode, true for chat)
   
   let showPrompts = false;
   let randomPrompt = '';
@@ -56,6 +57,18 @@
     };
     return labels[category] || category;
   }
+
+  function getCategoryDescription(category) {
+    const descriptions = {
+      daily: 'Quick prompts for daily thoughts and experiences',
+      reflection: 'Thoughtful prompts for deeper self-exploration',
+      emotional: 'Prompts to explore and understand your feelings',
+      relationships: 'Prompts about connections with others',
+      challenges: 'Prompts for navigating difficulties and obstacles',
+      homesickness: 'Prompts about missing home and adjusting to new places'
+    };
+    return descriptions[category] || '';
+  }
   
   function getCategoryIcon(category) {
     const icons = {
@@ -72,18 +85,17 @@
 
 <div class="prompts-container">
   <div class="prompts-header-bar">
-    <div class="prompts-intro">
-      <span class="prompts-hint">💡 Click a category or use Random to get started</span>
-    </div>
-    <button
-      class="random-prompt-header-btn"
-      on:click={showRandomPrompt}
-      title="Get a random writing prompt to help you start"
-      type="button"
-    >
-      <span class="random-icon">✨</span>
-      <span class="random-label">Random Prompt</span>
-    </button>
+    {#if showRandomButton}
+      <button
+        class="random-prompt-header-btn"
+        on:click={showRandomPrompt}
+        title="Get a random writing prompt to help you start"
+        type="button"
+      >
+        <span class="random-icon">✨</span>
+        <span class="random-label">Random</span>
+      </button>
+    {/if}
     
     <div class="categories-bar" class:collapsed={isCollapsed}>
       {#each Object.keys(journalPrompts) as category}
@@ -96,13 +108,16 @@
             showPrompts = true;
             isCollapsed = false;
           }}
-          title={getCategoryLabel(category)}
           type="button"
         >
           <span class="category-icon">{getCategoryIcon(category)}</span>
           {#if showLabels || !isCollapsed}
             <span class="category-label">{getCategoryLabel(category)}</span>
           {/if}
+          <span class="tooltip">
+            <span class="tooltip-title">{getCategoryLabel(category)}</span>
+            <span class="tooltip-description">{getCategoryDescription(category)}</span>
+          </span>
         </button>
       {/each}
     </div>
@@ -162,11 +177,13 @@
     flex-direction: column;
     gap: 0.5rem;
     width: 100%;
+    overflow: visible;
   }
 
   .prompts-header-bar {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
     width: 100%;
   }
@@ -204,40 +221,19 @@
     font-weight: 600;
   }
 
-  .prompts-intro {
-    display: flex;
-    align-items: center;
-    padding: 0.5rem 0;
-    font-size: 0.9rem;
-    color: #4a3728;
-    opacity: 0.9;
-    font-weight: 500;
-    flex: 1;
-  }
-
-  .prompts-hint {
-    white-space: nowrap;
-  }
-
-  .categories-bar.collapsed + .collapse-toggle {
-    /* When collapsed, make the collapse button more prominent */
-  }
-
-  .categories-bar.collapsed ~ .prompts-intro {
-    /* Keep hint visible even when collapsed */
-    opacity: 1;
-  }
 
   .categories-bar {
     display: flex;
     gap: 0.5rem;
     overflow-x: auto;
+    overflow-y: visible;
     padding-bottom: 0.25rem;
     scrollbar-width: thin;
     scrollbar-color: rgba(139, 115, 85, 0.3) transparent;
     -webkit-overflow-scrolling: touch;
-    flex: 1;
+    justify-content: center;
     transition: max-height 0.3s ease, opacity 0.3s ease;
+    position: relative;
   }
 
   .categories-bar.collapsed {
@@ -248,11 +244,6 @@
     margin: 0;
   }
 
-  .prompts-container:has(.categories-bar.collapsed) .prompts-intro {
-    /* Make hint more prominent when prompts are collapsed */
-    font-weight: 600;
-    color: #4a3728;
-  }
 
   .collapse-toggle {
     padding: 0.625rem 0.75rem;
@@ -307,9 +298,14 @@
     flex-shrink: 0;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     min-width: 44px;
     height: 44px;
+    z-index: 1;
+  }
+
+  .category-btn-bar:hover {
+    z-index: 1001;
   }
 
   .category-btn-bar.with-labels {
@@ -317,12 +313,62 @@
     min-width: auto;
   }
 
-  .category-btn-bar:not(.with-labels):not(:hover) .category-label {
+  .category-btn-bar:not(.with-labels) .category-label {
     display: none;
   }
 
-  .category-btn-bar:hover .category-label {
-    display: inline;
+  .tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.75rem;
+    background: rgba(74, 55, 40, 0.98);
+    color: white;
+    font-size: 0.85rem;
+    border-radius: 8px;
+    white-space: normal;
+    width: max-content;
+    max-width: 220px;
+    min-width: 180px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    transform: translateX(-50%) translateY(4px);
+    z-index: 1002;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    text-align: left;
+  }
+
+  .tooltip-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .tooltip-description {
+    font-weight: 400;
+    font-size: 0.8rem;
+    opacity: 0.9;
+    line-height: 1.3;
+  }
+
+  .tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(74, 55, 40, 0.95);
+  }
+
+  .category-btn-bar:hover .tooltip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
   }
 
   .category-btn-bar::before {

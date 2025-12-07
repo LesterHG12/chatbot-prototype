@@ -6,7 +6,6 @@
   import EmotionalInsights from '$lib/components/EmotionalInsights.svelte';
   import ConnectionReminders from '$lib/components/ConnectionReminders.svelte';
   import FavoritesView from '$lib/components/FavoritesView.svelte';
-  import PrivacyInfo from '$lib/components/PrivacyInfo.svelte';
   import { DiaryStore } from '$lib/diary/DiaryStore.js';
 
   let currentView = 'diary'; // 'diary', 'chat', or 'insights'
@@ -105,7 +104,6 @@
 
 <div class="app-container">
   <MoodTracker bind:this={moodTrackerRef} />
-  <PrivacyInfo />
 
   <div class="nav-tabs">
     <button 

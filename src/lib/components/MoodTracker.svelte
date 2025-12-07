@@ -46,15 +46,8 @@
   }
 
   function checkIfShouldShowMoodTracker() {
-    const today = diaryStore.formatDate();
-    const lastShown = localStorage.getItem('last_mood_check');
-    const userPreference = localStorage.getItem('mood_tracker_preference');
-    
-    // Only auto-show if user hasn't disabled it and it's a new day
-    if (userPreference !== 'disabled' && lastShown !== today) {
-      // Show mood tracker if it's a new day (but not blocking - user can skip)
-      showMoodTracker = true;
-    }
+    // Don't auto-show mood tracker - mood will be extracted from text instead
+    showMoodTracker = false;
   }
 
   function saveMood() {

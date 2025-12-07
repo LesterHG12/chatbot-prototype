@@ -3,6 +3,7 @@
   import { DiaryStore } from '../diary/DiaryStore.js';
   import JournalPrompts from './JournalPrompts.svelte';
   import ToastNotification from './ToastNotification.svelte';
+  import { getRandomPrompt } from '../prompts/JournalPrompts.js';
   import { onMount } from 'svelte';
 
   const dispatch = createEventDispatcher();
@@ -26,6 +27,7 @@
   let contextMenuDate = '';
   let contextMenuX = 0;
   let contextMenuY = 0;
+  let lastFocusedSide = 'left'; // Track which textarea was last focused: 'left' or 'right'
 
   onMount(() => {
     // Set to today's date by default
@@ -168,15 +170,57 @@
     toastVisible = true;
   }
 
+  async function extractMoodFromText(text, date) {
+    if (!text || text.trim().length < 10) return; // Skip if text is too short
+    
+    try {
+      const res = await fetch('/api/extract-mood', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.mood) {
+          diaryStore.setMood(date, data.mood);
+          // Also save stress, loneliness, homesickness levels
+          const today = diaryStore.formatDate();
+          if (date === today || date === selectedDate) {
+            leftEntryMetadata.mood = data.mood;
+          } else if (date === nextDate) {
+            rightEntryMetadata.mood = data.mood;
+          }
+          
+          // Save mood data to localStorage for mood tracker
+          const moodData = {
+            mood: data.mood,
+            stressLevel: data.stressLevel || 5,
+            lonelinessLevel: data.lonelinessLevel || 5,
+            homesicknessLevel: data.homesicknessLevel || 5,
+            timestamp: new Date().toISOString()
+          };
+          localStorage.setItem(`mood_${date}`, JSON.stringify(moodData));
+        }
+      }
+    } catch (err) {
+      console.error('Error extracting mood:', err);
+      // Silently fail - mood extraction is optional
+    }
+  }
+
   function handleTextChange() {
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
+    saveTimeout = setTimeout(async () => {
       if (entryText.trim()) {
         diaryStore.saveEntry(selectedDate, entryText);
         const wordCount = diaryStore.getWordCount(entryText);
         diaryStore.saveMetadata(selectedDate, { wordCount });
         leftEntryMetadata.wordCount = wordCount;
         showToast('Entry saved', 'success');
+        
+        // Extract mood from text automatically
+        await extractMoodFromText(entryText, selectedDate);
       } else {
         // Auto-delete if entry is empty
         diaryStore.deleteEntry(selectedDate);
@@ -187,13 +231,16 @@
 
   function handleNextEntryChange() {
     clearTimeout(nextSaveTimeout);
-    nextSaveTimeout = setTimeout(() => {
+    nextSaveTimeout = setTimeout(async () => {
       if (nextEntryText.trim()) {
         diaryStore.saveEntry(nextDate, nextEntryText);
         const wordCount = diaryStore.getWordCount(nextEntryText);
         diaryStore.saveMetadata(nextDate, { wordCount });
         rightEntryMetadata.wordCount = wordCount;
         showToast('Entry saved', 'success');
+        
+        // Extract mood from text automatically
+        await extractMoodFromText(nextEntryText, nextDate);
       } else {
         // Auto-delete if entry is empty
         diaryStore.deleteEntry(nextDate);
@@ -335,6 +382,11 @@
     selectedCategory = category;
   }
 
+  function handleRandomPrompt() {
+    const randomPrompt = getRandomPrompt();
+    handlePromptSelected(randomPrompt);
+  }
+
 
   // Format date for display
   function formatDateDisplay(dateString) {
@@ -380,6 +432,17 @@
     <button class="calendar-toggle-top" on:click|preventDefault={toggleCalendar} type="button" title="Open calendar">
       📅
     </button>
+  </div>
+
+  <!-- Single prompts component for both pages -->
+  <div class="global-prompts-container">
+    <JournalPrompts 
+      onSelectPrompt={(prompt) => handlePromptSelected(prompt)}
+      bind:selectedCategory={selectedCategory}
+      onCategoryChange={handleCategoryChange}
+      showLabels={false}
+      showRandomButton={true}
+    />
   </div>
 
   <div class="diary-pages-container">
@@ -471,16 +534,11 @@
           <textarea
             bind:value={entryText}
             on:input={handleTextChange}
+            on:focus={() => handleFocus('left')}
             on:contextmenu|preventDefault={(e) => handleRightClick(e, selectedDate, 'left')}
             placeholder=""
-            class="entry-textarea"
+            class="entry-textarea left"
           ></textarea>
-          <JournalPrompts 
-            onSelectPrompt={handlePromptSelected}
-            bind:selectedCategory={selectedCategory}
-            onCategoryChange={handleCategoryChange}
-            showLabels={false}
-          />
         </div>
       </div>
     </div>
@@ -541,16 +599,11 @@
           <textarea
             bind:value={nextEntryText}
             on:input={handleNextEntryChange}
+            on:focus={() => handleFocus('right')}
             on:contextmenu|preventDefault={(e) => handleRightClick(e, nextDate, 'right')}
             placeholder=""
-            class="entry-textarea"
+            class="entry-textarea right"
           ></textarea>
-          <JournalPrompts 
-            onSelectPrompt={handleNextPromptSelected}
-            bind:selectedCategory={selectedCategory}
-            onCategoryChange={handleCategoryChange}
-            showLabels={false}
-          />
         </div>
       </div>
     </div>
@@ -630,13 +683,14 @@
       0 20px 60px rgba(0, 0, 0, 0.3),
       inset 0 1px 0 rgba(255, 255, 255, 0.2);
     position: relative;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .journal-header {
     display: flex;
     justify-content: center;
     align-items: center;
+    gap: 1rem;
     margin-bottom: 1.5rem;
     position: relative;
     z-index: 5;
@@ -653,6 +707,50 @@
     font-weight: 600;
     transition: all 0.2s ease;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  .random-prompt-global-btn {
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.2) 0%, rgba(255, 223, 0, 0.15) 100%);
+    border: 2px solid rgba(255, 193, 7, 0.4);
+    border-radius: 8px;
+    color: #4a3728;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(255, 193, 7, 0.15);
+    white-space: nowrap;
+  }
+
+  .random-prompt-global-btn:hover {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.3) 0%, rgba(255, 223, 0, 0.25) 100%);
+    border-color: rgba(255, 193, 7, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.25);
+  }
+
+  .global-prompts-container {
+    position: absolute;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    width: calc(100% - 4rem);
+    max-width: 1000px;
+    pointer-events: none;
+  }
+
+  .global-prompts-container :global(.prompts-container) {
+    pointer-events: all;
+    background: linear-gradient(135deg, rgba(255, 254, 249, 0.98) 0%, rgba(255, 249, 240, 0.98) 100%);
+    border: 2px solid rgba(139, 115, 85, 0.3);
+    border-radius: 16px;
+    padding: 0.75rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    backdrop-filter: blur(10px);
+    position: relative;
+    overflow: visible;
   }
 
   .calendar-toggle-top:hover {
