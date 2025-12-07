@@ -48,8 +48,11 @@
   function checkIfShouldShowMoodTracker() {
     const today = diaryStore.formatDate();
     const lastShown = localStorage.getItem('last_mood_check');
-    if (lastShown !== today) {
-      // Show mood tracker if it's a new day
+    const userPreference = localStorage.getItem('mood_tracker_preference');
+    
+    // Only auto-show if user hasn't disabled it and it's a new day
+    if (userPreference !== 'disabled' && lastShown !== today) {
+      // Show mood tracker if it's a new day (but not blocking - user can skip)
       showMoodTracker = true;
     }
   }
@@ -89,6 +92,7 @@
     const today = diaryStore.formatDate();
     localStorage.setItem('last_mood_check', today);
     showMoodTracker = false;
+    // Don't disable permanently, just skip for today
   }
 
   export function toggleMoodTracker() {
@@ -128,17 +132,29 @@
       {#if selectedMood}
         <div class="level-trackers">
           <div class="level-tracker">
-            <label>Stress Level: {stressLevel}/10</label>
+            <div class="tracker-header">
+              <label>Stress Level: {stressLevel}/10</label>
+              <span class="tracker-hint" title="Daily stress - changes day to day based on immediate pressures, deadlines, or daily challenges">📅 Daily</span>
+            </div>
+            <div class="tracker-explanation">Changes day-to-day based on immediate pressures</div>
             <input type="range" min="1" max="10" bind:value={stressLevel} class="slider" />
           </div>
           
           <div class="level-tracker">
-            <label>Loneliness: {lonelinessLevel}/10</label>
+            <div class="tracker-header">
+              <label>Loneliness: {lonelinessLevel}/10</label>
+              <span class="tracker-hint" title="Longer-term feeling - may change over weeks or months, not daily">📆 Long-term</span>
+            </div>
+            <div class="tracker-explanation">Longer-term feeling that changes over weeks</div>
             <input type="range" min="1" max="10" bind:value={lonelinessLevel} class="slider" />
           </div>
           
           <div class="level-tracker">
-            <label>Homesickness: {homesicknessLevel}/10</label>
+            <div class="tracker-header">
+              <label>Homesickness: {homesicknessLevel}/10</label>
+              <span class="tracker-hint" title="Longer-term feeling - may change over weeks or months, not daily">📆 Long-term</span>
+            </div>
+            <div class="tracker-explanation">Longer-term feeling that changes over weeks</div>
             <input type="range" min="1" max="10" bind:value={homesicknessLevel} class="slider" />
           </div>
         </div>
@@ -155,6 +171,18 @@
         <div class="mood-actions">
           <button class="save-btn" on:click={saveMood}>Save & Continue</button>
           <button class="skip-btn" on:click={skipMoodCheck}>Skip for now</button>
+        </div>
+        <div class="mood-footer">
+          <label class="disable-checkbox">
+            <input type="checkbox" on:change={(e) => {
+              if (e.target.checked) {
+                localStorage.setItem('mood_tracker_preference', 'disabled');
+              } else {
+                localStorage.removeItem('mood_tracker_preference');
+              }
+            }} />
+            <span>Don't show this daily reminder</span>
+          </label>
         </div>
       {/if}
     </div>
@@ -308,6 +336,47 @@
     color: #4a3728;
     font-weight: 600;
     font-size: 0.95rem;
+  }
+
+  .tracker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .tracker-hint {
+    font-size: 0.75rem;
+    color: #6b5743;
+    opacity: 0.7;
+    font-weight: 500;
+  }
+
+  .tracker-explanation {
+    font-size: 0.8rem;
+    color: #6b5743;
+    opacity: 0.8;
+    font-style: italic;
+    margin-bottom: 0.5rem;
+  }
+
+  .mood-footer {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(139, 115, 85, 0.2);
+  }
+
+  .disable-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: #6b5743;
+    cursor: pointer;
+  }
+
+  .disable-checkbox input[type="checkbox"] {
+    cursor: pointer;
   }
 
   .slider {

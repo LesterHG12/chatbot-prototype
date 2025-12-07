@@ -1,8 +1,13 @@
 <script>
+  import { createEventDispatcher } from 'svelte';
+  
   export let message;
   export let mode = 'reflection'; // 'reflection', 'validator', or 'conflict'
   
+  const dispatch = createEventDispatcher();
+  
   let isVisible = false;
+  let feedbackGiven = null; // 'helpful' or 'not-helpful'
   
   $: if (message.role === 'assistant') {
     // Trigger animation when message appears
@@ -11,6 +16,16 @@
     }, 50);
   } else {
     isVisible = true;
+  }
+
+  function giveFeedback(type) {
+    if (feedbackGiven) return; // Only allow one feedback per message
+    feedbackGiven = type;
+    dispatch('feedback', { 
+      messageId: message.id || Date.now(), 
+      helpful: type === 'helpful',
+      mode 
+    });
   }
 </script>
 
@@ -28,6 +43,26 @@
       class:visible={isVisible}
     >
       {message.content}
+      <div class="feedback-buttons">
+        <button
+          class="feedback-btn"
+          class:active={feedbackGiven === 'helpful'}
+          on:click={() => giveFeedback('helpful')}
+          title="This response was helpful"
+          type="button"
+        >
+          👍
+        </button>
+        <button
+          class="feedback-btn"
+          class:active={feedbackGiven === 'not-helpful'}
+          on:click={() => giveFeedback('not-helpful')}
+          title="This response was not helpful"
+          type="button"
+        >
+          👎
+        </button>
+      </div>
     </div>
   {/if}
 </div>
@@ -48,11 +83,11 @@
   }
 
   .bubble {
-    padding: 0.75rem 1rem;
+    padding: 0.875rem 1.125rem;
     border-radius: 12px;
     max-width: 75%;
     white-space: pre-wrap;
-    line-height: 1.5;
+    line-height: 1.6;
     word-wrap: break-word;
     transition: opacity 0.2s ease-in;
   }
@@ -81,13 +116,13 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   }
 
-  /* Validator Mode: Dark green bubbles, serious tone */
+  /* Validator Mode: Lighter green bubbles, serious but softer tone */
   .bubble.assistant.validator-mode {
-    background: #1e5f3e;
-    color: #ffffff;
-    border: 1px solid #155d2e;
-    border-radius: 12px;
-    font-weight: 450;
+    background: linear-gradient(135deg, rgba(220, 252, 231, 0.95) 0%, rgba(187, 247, 208, 0.95) 100%);
+    color: #166534;
+    border: 2px solid rgba(34, 197, 94, 0.3);
+    border-radius: 16px;
+    font-weight: 500;
   }
 
   /* Conflict Mode: Warm orange/amber bubbles, supportive but direct */
@@ -97,6 +132,47 @@
     border: 1px solid #b8631e;
     border-radius: 12px;
     font-weight: 450;
+  }
+
+  .feedback-buttons {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(139, 115, 85, 0.15);
+  }
+
+  .feedback-btn {
+    background: transparent;
+    border: 1px solid rgba(139, 115, 85, 0.3);
+    border-radius: 6px;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+    opacity: 0.6;
+  }
+
+  .feedback-btn:hover {
+    opacity: 1;
+    background: rgba(139, 115, 85, 0.1);
+    border-color: rgba(139, 115, 85, 0.5);
+  }
+
+  .feedback-btn.active {
+    opacity: 1;
+    background: rgba(139, 115, 85, 0.2);
+    border-color: rgba(139, 115, 85, 0.6);
+  }
+
+  .bubble.assistant.validator-mode .feedback-btn {
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #166534;
+  }
+
+  .bubble.assistant.validator-mode .feedback-btn:hover {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.5);
   }
 
   @media (max-width: 640px) {

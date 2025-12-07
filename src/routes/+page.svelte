@@ -6,6 +6,7 @@
   import EmotionalInsights from '$lib/components/EmotionalInsights.svelte';
   import ConnectionReminders from '$lib/components/ConnectionReminders.svelte';
   import FavoritesView from '$lib/components/FavoritesView.svelte';
+  import PrivacyInfo from '$lib/components/PrivacyInfo.svelte';
   import { DiaryStore } from '$lib/diary/DiaryStore.js';
 
   let currentView = 'diary'; // 'diary', 'chat', or 'insights'
@@ -64,6 +65,19 @@
     }
   }
 
+  function handleTalkAboutDay(event) {
+    const { date } = event.detail;
+    // Switch to chat mode
+    updateDiaryContext();
+    updateTodayEntry();
+    currentView = 'chat';
+    
+    // If chat interface is available, import that day's entry
+    if (chatInterfaceRef && chatInterfaceRef.importEntryForDate) {
+      chatInterfaceRef.importEntryForDate(date);
+    }
+  }
+
   function switchToChat() {
     updateDiaryContext();
     updateTodayEntry();
@@ -91,6 +105,7 @@
 
 <div class="app-container">
   <MoodTracker bind:this={moodTrackerRef} />
+  <PrivacyInfo />
 
   <div class="nav-tabs">
     <button 
@@ -131,6 +146,7 @@
           on:startInteractive={handleStartInteractive}
           on:entrySaved={handleDiaryUpdate}
           on:moodSaved={handleMoodSaved}
+          on:talkAboutDay={handleTalkAboutDay}
         />
       </div>
     {/if}

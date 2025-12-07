@@ -92,7 +92,155 @@
     }
     
     showImportDiary = false;
-    showDiaryContext = true;
+    
+    // Save to current session
+    if (currentSessionId) {
+      chatStore.updateSession(currentSessionId, {
+        diaryContext,
+        includeTodayEntry
+      });
+    }
+    
+    // Auto-engage: proactively start conversation about the imported entry
+    autoEngageWithEntry(entry.date, entry.content);
+  }
+
+  // Export function to import entry for a specific date (called from right-click menu)
+  export function importEntryForDate(date) {
+    const entry = diaryStore.getEntry(date);
+    if (entry && entry.trim()) {
+      const today = diaryStore.formatDate();
+      
+      if (date === today) {
+        includeTodayEntry = true;
+      } else {
+        const entryContext = `Date: ${date}\n${entry}`;
+        diaryContext = diaryContext 
+          ? `${diaryContext}\n\n---\n\n${entryContext}`
+          : entryContext;
+      }
+      
+      // Save to current session
+      if (currentSessionId) {
+        chatStore.updateSession(currentSessionId, {
+          diaryContext,
+          includeTodayEntry
+        });
+      }
+      
+      // Auto-engage: send a proactive message based on the entry
+      autoEngageWithEntry(date, entry);
+    }
+  }
+
+  // Auto-engage bot when entry is imported
+  async function autoEngageWithEntry(date, entryText) {
+    // Create a more natural message that references the entry content
+    // Extract a snippet to make it feel more conversational
+    const snippet = entryText.substring(0, 100).trim();
+    const importMessage = snippet.length < entryText.length 
+      ? `I wrote about this: "${snippet}..."` 
+      : `I wrote about this: "${snippet}"`;
+    
+    const userMessage = {
+      role: 'user',
+      content: importMessage,
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    };
+    messages = [...messages, userMessage];
+    
+    // Persist immediately
+    if (currentSessionId) {
+      chatStore.setMessages(currentSessionId, messages);
+    }
+    
+    // Send to bot
+    input = '';
+    isLoading = true;
+    errorMsg = '';
+
+    abortController = new AbortController();
+
+    try {
+      let contextToSend = diaryContext;
+      if (includeTodayEntry && todayEntry && todayEntry.trim()) {
+        const today = new Date().toISOString().split('T')[0];
+        const todayEntryContext = `Today's diary entry (${today}):\n${todayEntry}`;
+        contextToSend = contextToSend 
+          ? `${contextToSend}\n\n---\n\n${todayEntryContext}`
+          : todayEntryContext;
+      }
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          history: messages,
+          diaryContext: contextToSend
+        }),
+        signal: abortController.signal
+      });
+
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      const data = await res.json();
+
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      if (!res.ok || data?.error) {
+        errorMsg = data?.error || 'Request failed';
+        isLoading = false;
+        abortController = null;
+        return;
+      }
+
+      if (data.assistantMessage) {
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        const assistantMessage = {
+          role: 'assistant',
+          content: data.assistantMessage,
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        };
+        messages = [...messages, assistantMessage];
+        replierInput = data.replierInput || null;
+        
+        if (data.replierInput?.agent) {
+          currentMode = data.replierInput.agent;
+        }
+        
+        if (data.replierInput?.metrics) {
+          metricsCollector.saveMetricsHistory(data.replierInput.metrics);
+        }
+        
+        if (currentSessionId) {
+          chatStore.setMessages(currentSessionId, messages);
+          chatStore.updateSession(currentSessionId, {
+            diaryContext,
+            includeTodayEntry
+          });
+        }
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        isLoading = false;
+        abortController = null;
+        return;
+      }
+      errorMsg = 'Failed to send message. Please try again.';
+      console.error('Chat error:', err);
+    } finally {
+      if (!abortController?.signal.aborted) {
+        isLoading = false;
+        abortController = null;
+      }
+    }
   }
 
   // Load current session or create new one
@@ -105,7 +253,11 @@
       // If no messages, add greeting
       if (messages.length === 0) {
         const greeting = getInitialGreeting();
-        messages = [{ role: 'assistant', content: greeting }];
+        messages = [{ 
+          role: 'assistant', 
+          content: greeting,
+          id: `msg_${Date.now()}_greeting`
+        }];
         chatStore.setMessages(currentSessionId, messages);
       }
       
@@ -158,7 +310,11 @@
       
       if (messages.length === 0) {
         const greeting = getInitialGreeting();
-        messages = [{ role: 'assistant', content: greeting }];
+        messages = [{ 
+          role: 'assistant', 
+          content: greeting,
+          id: `msg_${Date.now()}_greeting`
+        }];
         chatStore.setMessages(currentSessionId, messages);
       }
       
@@ -190,7 +346,11 @@
       currentSessionId = session.id;
       messages = [];
       const greeting = getInitialGreeting();
-      messages = [{ role: 'assistant', content: greeting }];
+      messages = [{ 
+        role: 'assistant', 
+        content: greeting,
+        id: `msg_${Date.now()}_greeting`
+      }];
       chatStore.setMessages(currentSessionId, messages);
       diaryContext = '';
       includeTodayEntry = false;
@@ -247,6 +407,24 @@
     showChatHistory = !showChatHistory;
   }
 
+  // Handle user feedback on responses
+  function handleFeedback(feedback) {
+    // Store feedback for insights
+    if (typeof window !== 'undefined') {
+      try {
+        const feedbackHistory = JSON.parse(localStorage.getItem('response_feedback') || '[]');
+        feedbackHistory.push({
+          ...feedback,
+          timestamp: new Date().toISOString(),
+          sessionId: currentSessionId
+        });
+        localStorage.setItem('response_feedback', JSON.stringify(feedbackHistory));
+      } catch (err) {
+        console.error('Error saving feedback:', err);
+      }
+    }
+  }
+
   // Initialize greeting on mount
   onMount(() => {
     loadCurrentSession();
@@ -285,8 +463,13 @@
     const content = input.trim();
     if (!content || isLoading) return;
 
-    // Add user message
-    messages = [...messages, { role: 'user', content }];
+    // Add user message with ID
+    const userMessage = { 
+      role: 'user', 
+      content,
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    };
+    messages = [...messages, userMessage];
     
     // Persist user message immediately
     if (currentSessionId) {
@@ -347,7 +530,12 @@
           return;
         }
 
-        messages = [...messages, { role: 'assistant', content: data.assistantMessage }];
+        const assistantMessage = { 
+          role: 'assistant', 
+          content: data.assistantMessage,
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        };
+        messages = [...messages, assistantMessage];
         replierInput = data.replierInput || null;
         
         // Update current mode based on orchestrator's selection
@@ -395,13 +583,7 @@
 <div class="chat-container" class:sidebar-open={showChatHistory}>
   <div class="chat-header">
       <div class="header-row">
-        <div class="mode-indicator">
-          <span class="mode-icon">{getModeIcon(currentMode)}</span>
-          <span class="mode-label">{getModeDisplayName(currentMode)}</span>
-          {#if replierInput?.reasons}
-            <span class="mode-hint" title={replierInput.reasons}>ℹ️</span>
-          {/if}
-        </div>
+        <!-- Mode indicator hidden to make UX less explicit - mode switching happens automatically -->
         <div class="header-actions">
         <button 
           class="chat-history-btn"
@@ -436,29 +618,6 @@
       </div>
     </div>
     
-    {#if showDiaryContext}
-      <div class="diary-context-info">
-        <div class="context-header">
-          <strong>📝 Diary Context Used:</strong>
-          <button class="close-context" on:click={() => showDiaryContext = false}>×</button>
-        </div>
-        {#if diaryContext}
-          <div class="context-text">
-            {diaryContext.split('\n').slice(0, 10).join('\n')}
-            {diaryContext.split('\n').length > 10 ? '...' : ''}
-          </div>
-        {:else}
-          <div class="context-text muted">No diary entries found. Start writing in your diary to provide context!</div>
-        {/if}
-        {#if includeTodayEntry && todayEntry}
-          <div class="context-text" style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(139,115,85,0.2);">
-            <strong>Today's Entry:</strong><br/>
-            {todayEntry.substring(0, 200)}
-            {todayEntry.length > 200 ? '...' : ''}
-          </div>
-        {/if}
-      </div>
-    {/if}
   </div>
 
   {#if errorMsg}
@@ -536,6 +695,37 @@
     </div>
   </div>
 
+  {#if showDiaryContext}
+    <div class="diary-context-modal">
+      <div class="diary-context-modal-content">
+        <div class="context-modal-header">
+          <h3>📝 Diary Context</h3>
+          <button class="close-context-modal" on:click={() => showDiaryContext = false} type="button">×</button>
+        </div>
+        <div class="context-modal-body">
+          {#if diaryContext}
+            <div class="context-section">
+              <strong>Recent Diary Entries:</strong>
+              <div class="context-text">
+                {diaryContext}
+              </div>
+            </div>
+          {:else}
+            <div class="context-text muted">No diary entries found. Start writing in your diary to provide context!</div>
+          {/if}
+          {#if includeTodayEntry && todayEntry}
+            <div class="context-section">
+              <strong>Today's Entry:</strong>
+              <div class="context-text">
+                {todayEntry}
+              </div>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+
   {#if showImportDiary}
     <div class="import-diary-modal">
       <div class="import-diary-content">
@@ -571,7 +761,11 @@
 
   <div class="chat-messages">
     {#each messages as message, i}
-      <MessageBubble {message} mode={currentMode} />
+      <MessageBubble 
+        {message} 
+        mode={currentMode} 
+        on:feedback={(e) => handleFeedback(e.detail)}
+      />
     {/each}
     
     {#if isLoading}
@@ -654,16 +848,7 @@
   }
 
   .mode-indicator {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background: rgba(255, 255, 255, 0.7);
-    border-radius: 10px;
-    border: 2px solid rgba(139, 115, 85, 0.2);
-    font-size: 0.95rem;
-    color: #4a3728;
-    font-weight: 550;
+    display: none; /* Hidden to make mode switching less explicit */
   }
 
   .mode-icon {
@@ -753,54 +938,108 @@
     transform: translateY(-1px);
   }
 
-  .diary-context-info {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 10px;
-    border: 2px solid rgba(139, 115, 85, 0.25);
-    font-size: 0.9rem;
-    max-height: 200px;
-    overflow-y: auto;
+  .diary-context-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1001;
+    padding: 2rem;
   }
 
-  .context-header {
+  .diary-context-modal-content {
+    background: linear-gradient(135deg, #fffef9 0%, #fff9f0 100%);
+    border-radius: 16px;
+    border: 2px solid rgba(139, 115, 85, 0.3);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+    max-width: 600px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .context-modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
-    color: #4a3728;
-    font-size: 0.95rem;
+    padding: 1.5rem;
+    border-bottom: 2px solid rgba(139, 115, 85, 0.2);
+    background: linear-gradient(135deg, rgba(255, 248, 240, 0.8) 0%, rgba(255, 245, 230, 0.8) 100%);
   }
 
-  .close-context {
+  .context-modal-header h3 {
+    margin: 0;
+    color: #4a3728;
+    font-size: 1.25rem;
+    font-weight: 650;
+  }
+
+  .close-context-modal {
     background: transparent;
     border: none;
-    font-size: 1.5rem;
+    font-size: 2rem;
     color: #6b5743;
     cursor: pointer;
     line-height: 1;
     padding: 0;
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     transition: background 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  .close-context:hover {
+  .close-context-modal:hover {
     background: rgba(107, 87, 67, 0.1);
+  }
+
+  .context-modal-body {
+    padding: 1.5rem;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .context-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .context-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .context-section strong {
+    display: block;
+    color: #4a3728;
+    font-size: 0.95rem;
+    font-weight: 650;
+    margin-bottom: 0.75rem;
   }
 
   .context-text {
     color: #4a3728;
     line-height: 1.6;
     white-space: pre-wrap;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
+    padding: 0.75rem;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+    border: 1px solid rgba(139, 115, 85, 0.2);
   }
 
   .context-text.muted {
     color: #6b5743;
     font-style: italic;
+    text-align: center;
+    padding: 1.5rem;
   }
 
   .import-diary-modal {

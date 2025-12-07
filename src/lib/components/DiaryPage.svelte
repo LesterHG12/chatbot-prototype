@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { DiaryStore } from '../diary/DiaryStore.js';
   import JournalPrompts from './JournalPrompts.svelte';
+  import ToastNotification from './ToastNotification.svelte';
   import { onMount } from 'svelte';
 
   const dispatch = createEventDispatcher();
@@ -16,8 +17,15 @@
   let showDeleteConfirm = false;
   let deleteTargetDate = '';
   let deleteTargetSide = ''; // 'left' or 'right'
-  let leftEntryMetadata = { starred: false, mood: null, wordCount: 0 };
-  let rightEntryMetadata = { starred: false, mood: null, wordCount: 0 };
+  let leftEntryMetadata = { starred: false, mood: null, wordCount: 0, isPrivate: false };
+  let rightEntryMetadata = { starred: false, mood: null, wordCount: 0, isPrivate: false };
+  let toastMessage = '';
+  let toastVisible = false;
+  let toastType = 'success';
+  let contextMenuVisible = false;
+  let contextMenuDate = '';
+  let contextMenuX = 0;
+  let contextMenuY = 0;
 
   onMount(() => {
     // Set to today's date by default
@@ -31,7 +39,12 @@
     
     entryText = diaryStore.getEntry(selectedDate);
     const metadata = diaryStore.getMetadata(selectedDate);
-    leftEntryMetadata = { starred: metadata.starred || false, mood: metadata.mood || null, wordCount: diaryStore.getWordCount(entryText) };
+    leftEntryMetadata = { 
+      starred: metadata.starred || false, 
+      mood: metadata.mood || null, 
+      wordCount: diaryStore.getWordCount(entryText),
+      isPrivate: metadata.isPrivate || false
+    };
     
     // Calculate and load next day's entry (always selectedDate + 1 day)
     const currentDate = new Date(selectedDate + 'T00:00:00'); // Add time to avoid timezone issues
@@ -40,7 +53,12 @@
     nextDate = diaryStore.formatDate(nextDay);
     nextEntryText = diaryStore.getEntry(nextDate);
     const nextMetadata = diaryStore.getMetadata(nextDate);
-    rightEntryMetadata = { starred: nextMetadata.starred || false, mood: nextMetadata.mood || null, wordCount: diaryStore.getWordCount(nextEntryText) };
+    rightEntryMetadata = { 
+      starred: nextMetadata.starred || false, 
+      mood: nextMetadata.mood || null, 
+      wordCount: diaryStore.getWordCount(nextEntryText),
+      isPrivate: nextMetadata.isPrivate || false
+    };
   }
 
   function saveEntry() {
@@ -108,10 +126,48 @@
     dispatch('startInteractive');
   }
 
+  function handleRightClick(event, date, side) {
+    if (event.button === 2) { // Right click
+      event.preventDefault();
+      const entryContent = side === 'left' ? entryText : nextEntryText;
+      if (entryContent && entryContent.trim()) {
+        contextMenuDate = date;
+        contextMenuX = event.clientX;
+        contextMenuY = event.clientY;
+        contextMenuVisible = true;
+      }
+    }
+  }
+
+  function handleContextMenuAction(action) {
+    if (action === 'talkAboutDay' && contextMenuDate) {
+      // Dispatch event to open interactive mode with this day's entry
+      dispatch('talkAboutDay', { date: contextMenuDate });
+      contextMenuVisible = false;
+    }
+  }
+
+  function closeContextMenu() {
+    contextMenuVisible = false;
+  }
+
+  // Close context menu on click outside
+  function handleClickOutside(event) {
+    if (contextMenuVisible && !event.target.closest('.context-menu')) {
+      closeContextMenu();
+    }
+  }
+
   // Auto-save on text change with debounce
   let saveTimeout;
   let nextSaveTimeout;
   
+  function showToast(message, type = 'success') {
+    toastMessage = message;
+    toastType = type;
+    toastVisible = true;
+  }
+
   function handleTextChange() {
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(() => {
@@ -120,6 +176,7 @@
         const wordCount = diaryStore.getWordCount(entryText);
         diaryStore.saveMetadata(selectedDate, { wordCount });
         leftEntryMetadata.wordCount = wordCount;
+        showToast('Entry saved', 'success');
       } else {
         // Auto-delete if entry is empty
         diaryStore.deleteEntry(selectedDate);
@@ -136,6 +193,7 @@
         const wordCount = diaryStore.getWordCount(nextEntryText);
         diaryStore.saveMetadata(nextDate, { wordCount });
         rightEntryMetadata.wordCount = wordCount;
+        showToast('Entry saved', 'success');
       } else {
         // Auto-delete if entry is empty
         diaryStore.deleteEntry(nextDate);
@@ -153,6 +211,21 @@
     } else {
       rightEntryMetadata.starred = isStarred;
     }
+  }
+
+  function togglePrivate(side) {
+    const date = side === 'left' ? selectedDate : nextDate;
+    const metadata = diaryStore.getMetadata(date);
+    const newPrivateState = !metadata.isPrivate;
+    diaryStore.saveMetadata(date, { isPrivate: newPrivateState });
+    
+    if (side === 'left') {
+      leftEntryMetadata.isPrivate = newPrivateState;
+    } else {
+      rightEntryMetadata.isPrivate = newPrivateState;
+    }
+    
+    showToast(newPrivateState ? 'Entry marked as private' : 'Entry marked as public', 'info');
   }
 
 
@@ -360,15 +433,26 @@
             <h2 class="date-title">{formattedDate}</h2>
           </div>
 
-          <button 
-            class="star-btn"
-            class:starred={leftEntryMetadata.starred}
-            on:click|preventDefault={() => toggleStar('left')}
-            title={leftEntryMetadata.starred ? 'Unstar entry' : 'Star entry'}
-            type="button"
-          >
-            {leftEntryMetadata.starred ? '⭐' : '☆'}
-          </button>
+          <div class="entry-actions-left">
+            <button 
+              class="star-btn"
+              class:starred={leftEntryMetadata.starred}
+              on:click|preventDefault={() => toggleStar('left')}
+              title={leftEntryMetadata.starred ? 'Unstar entry' : 'Star entry'}
+              type="button"
+            >
+              {leftEntryMetadata.starred ? '⭐' : '☆'}
+            </button>
+            <button 
+              class="private-btn"
+              class:private={leftEntryMetadata.isPrivate}
+              on:click|preventDefault={() => togglePrivate('left')}
+              title={leftEntryMetadata.isPrivate ? 'Entry is private (not shared with chatbot)' : 'Mark as private (exclude from chatbot)'}
+              type="button"
+            >
+              {leftEntryMetadata.isPrivate ? '🔒' : '🔓'}
+            </button>
+          </div>
           {#if entryText.trim()}
             <button 
               class="delete-btn"
@@ -382,11 +466,12 @@
         </div>
 
 
-        <div class="entry-area">
+        <div class="entry-area" on:contextmenu|preventDefault={(e) => handleRightClick(e, selectedDate, 'left')}>
           <div class="entry-lines"></div>
           <textarea
             bind:value={entryText}
             on:input={handleTextChange}
+            on:contextmenu|preventDefault={(e) => handleRightClick(e, selectedDate, 'left')}
             placeholder=""
             class="entry-textarea"
           ></textarea>
@@ -407,15 +492,26 @@
     <div class="diary-page right-page">
       <div class="page-content">
       <div class="page-header">
-        <button 
-          class="star-btn"
-          class:starred={rightEntryMetadata.starred}
-          on:click|preventDefault={() => toggleStar('right')}
-          title={rightEntryMetadata.starred ? 'Unstar entry' : 'Star entry'}
-          type="button"
-        >
-          {rightEntryMetadata.starred ? '⭐' : '☆'}
-        </button>
+        <div class="entry-actions-right">
+          <button 
+            class="star-btn"
+            class:starred={rightEntryMetadata.starred}
+            on:click|preventDefault={() => toggleStar('right')}
+            title={rightEntryMetadata.starred ? 'Unstar entry' : 'Star entry'}
+            type="button"
+          >
+            {rightEntryMetadata.starred ? '⭐' : '☆'}
+          </button>
+          <button 
+            class="private-btn"
+            class:private={rightEntryMetadata.isPrivate}
+            on:click|preventDefault={() => togglePrivate('right')}
+            title={rightEntryMetadata.isPrivate ? 'Entry is private (not shared with chatbot)' : 'Mark as private (exclude from chatbot)'}
+            type="button"
+          >
+            {rightEntryMetadata.isPrivate ? '🔒' : '🔓'}
+          </button>
+        </div>
         
         <div class="date-display">
           <h2 class="date-title">{formatDateDisplay(nextDate)}</h2>
@@ -440,11 +536,12 @@
         </div>
       </div>
 
-        <div class="entry-area">
+        <div class="entry-area" on:contextmenu|preventDefault={(e) => handleRightClick(e, nextDate, 'right')}>
           <div class="entry-lines"></div>
           <textarea
             bind:value={nextEntryText}
             on:input={handleNextEntryChange}
+            on:contextmenu|preventDefault={(e) => handleRightClick(e, nextDate, 'right')}
             placeholder=""
             class="entry-textarea"
           ></textarea>
@@ -485,6 +582,34 @@
             Delete
           </button>
         </div>
+      </div>
+    </div>
+  {/if}
+
+  <ToastNotification 
+    message={toastMessage} 
+    type={toastType} 
+    bind:visible={toastVisible}
+  />
+
+  {#if contextMenuVisible}
+    <div 
+      class="context-menu-overlay"
+      on:click={closeContextMenu}
+      on:contextmenu|preventDefault={closeContextMenu}
+    >
+      <div 
+        class="context-menu"
+        style="left: {contextMenuX}px; top: {contextMenuY}px;"
+        on:click|stopPropagation
+      >
+        <button 
+          class="context-menu-item"
+          on:click={() => handleContextMenuAction('talkAboutDay')}
+          type="button"
+        >
+          💬 Talk about this day
+        </button>
       </div>
     </div>
   {/if}
@@ -783,9 +908,9 @@
     z-index: 1;
     background: repeating-linear-gradient(
       transparent,
-      transparent 27px,
-      rgba(139, 115, 85, 0.08) 27px,
-      rgba(139, 115, 85, 0.08) 28px
+      transparent 31px,
+      rgba(139, 115, 85, 0.1) 31px,
+      rgba(139, 115, 85, 0.1) 32px
     );
   }
 
@@ -796,7 +921,7 @@
     background: transparent;
     color: #2d1f14;
     font-size: 1rem;
-    line-height: 28px;
+    line-height: 32px;
     font-family: 'Georgia', 'Times New Roman', serif;
     resize: none;
     min-height: 400px;
@@ -1012,5 +1137,75 @@
     background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+  }
+
+  .entry-actions-left,
+  .entry-actions-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .private-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    opacity: 0.7;
+  }
+
+  .private-btn:hover {
+    opacity: 1;
+    background: rgba(139, 115, 85, 0.1);
+  }
+
+  .private-btn.private {
+    opacity: 1;
+    color: #dc2626;
+  }
+
+  .context-menu-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2000;
+    background: transparent;
+  }
+
+  .context-menu {
+    position: fixed;
+    background: linear-gradient(135deg, #fffef9 0%, #fff9f0 100%);
+    border: 2px solid rgba(139, 115, 85, 0.3);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    padding: 0.5rem;
+    z-index: 2001;
+    min-width: 200px;
+  }
+
+  .context-menu-item {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: #4a3728;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-align: left;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .context-menu-item:hover {
+    background: rgba(139, 115, 85, 0.1);
   }
 </style>

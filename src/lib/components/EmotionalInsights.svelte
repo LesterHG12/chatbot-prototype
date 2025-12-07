@@ -11,6 +11,25 @@
 
   function updateInsights() {
     insights = metricsCollector.getEmotionalInsights();
+    
+    // Add feedback statistics
+    if (typeof window !== 'undefined') {
+      try {
+        const feedbackHistory = JSON.parse(localStorage.getItem('response_feedback') || '[]');
+        const helpfulCount = feedbackHistory.filter(f => f.helpful === true).length;
+        const notHelpfulCount = feedbackHistory.filter(f => f.helpful === false).length;
+        const totalFeedback = helpfulCount + notHelpfulCount;
+        
+        insights.feedbackStats = {
+          helpful: helpfulCount,
+          notHelpful: notHelpfulCount,
+          total: totalFeedback,
+          helpfulRate: totalFeedback > 0 ? Math.round((helpfulCount / totalFeedback) * 100) : 0
+        };
+      } catch (err) {
+        console.error('Error loading feedback stats:', err);
+      }
+    }
   }
 
   export function refresh() {
@@ -91,6 +110,18 @@
           {/if}
         </div>
       </div>
+
+      {#if insights.feedbackStats && insights.feedbackStats.total > 0}
+        <div class="insight-item">
+          <div class="insight-label">Response Helpfulness</div>
+          <div class="insight-value" style="color: {insights.feedbackStats.helpfulRate >= 70 ? '#22c55e' : insights.feedbackStats.helpfulRate >= 50 ? '#eab308' : '#ef4444'}">
+            {insights.feedbackStats.helpfulRate}% helpful
+          </div>
+          <div class="insight-note">
+            {insights.feedbackStats.helpful} helpful, {insights.feedbackStats.notHelpful} not helpful
+          </div>
+        </div>
+      {/if}
     </div>
 
     <div class="insights-footer">

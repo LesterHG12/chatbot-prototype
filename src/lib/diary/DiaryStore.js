@@ -82,12 +82,20 @@ export class DiaryStore {
     }));
   }
 
-  // Get entries formatted for agent context
+  // Get entries formatted for agent context (excluding private entries)
   getContextForAgents(limit = 5) {
     const recentEntries = this.getRecentEntries(limit);
     if (recentEntries.length === 0) return '';
 
-    const contextParts = recentEntries.map(entry => 
+    // Filter out private entries
+    const publicEntries = recentEntries.filter(entry => {
+      const metadata = this.getMetadata(entry.date);
+      return !metadata.isPrivate;
+    });
+
+    if (publicEntries.length === 0) return '';
+
+    const contextParts = publicEntries.map(entry => 
       `Date: ${entry.date}\n${entry.content}`
     );
 
@@ -122,7 +130,8 @@ export class DiaryStore {
       starred: false,
       tags: [],
       mood: null,
-      wordCount: 0
+      wordCount: 0,
+      isPrivate: false
     };
   }
 

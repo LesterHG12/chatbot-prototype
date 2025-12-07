@@ -8,6 +8,7 @@
   
   let showPrompts = false;
   let randomPrompt = '';
+  let isCollapsed = false;
   
   $: if (showPrompts) {
     randomPrompt = getRandomPrompt();
@@ -18,6 +19,23 @@
       onSelectPrompt(prompt);
     }
     showPrompts = false;
+    isCollapsed = true; // Collapse after selection to save space
+  }
+  
+  function toggleCollapse() {
+    isCollapsed = !isCollapsed;
+    if (!isCollapsed) {
+      showPrompts = false;
+    }
+  }
+  
+  function showRandomPrompt() {
+    randomPrompt = getRandomPrompt();
+    if (onSelectPrompt) {
+      onSelectPrompt(randomPrompt);
+    }
+    showPrompts = false;
+    isCollapsed = true;
   }
   
   function selectCategory(category) {
@@ -53,25 +71,50 @@
 </script>
 
 <div class="prompts-container">
-  <div class="categories-bar">
-    {#each Object.keys(journalPrompts) as category}
-      <button
-        class="category-btn-bar"
-        class:active={selectedCategory === category}
-        class:with-labels={showLabels}
-        on:click={() => {
-          selectCategory(category);
-          showPrompts = true;
-        }}
-        title={getCategoryLabel(category)}
-        type="button"
-      >
-        <span class="category-icon">{getCategoryIcon(category)}</span>
-        {#if showLabels}
-          <span class="category-label">{getCategoryLabel(category)}</span>
-        {/if}
-      </button>
-    {/each}
+  <div class="prompts-header-bar">
+    <div class="prompts-intro">
+      <span class="prompts-hint">💡 Click a category or use Random to get started</span>
+    </div>
+    <button
+      class="random-prompt-header-btn"
+      on:click={showRandomPrompt}
+      title="Get a random writing prompt to help you start"
+      type="button"
+    >
+      <span class="random-icon">✨</span>
+      <span class="random-label">Random Prompt</span>
+    </button>
+    
+    <div class="categories-bar" class:collapsed={isCollapsed}>
+      {#each Object.keys(journalPrompts) as category}
+        <button
+          class="category-btn-bar"
+          class:active={selectedCategory === category}
+          class:with-labels={showLabels}
+          on:click={() => {
+            selectCategory(category);
+            showPrompts = true;
+            isCollapsed = false;
+          }}
+          title={getCategoryLabel(category)}
+          type="button"
+        >
+          <span class="category-icon">{getCategoryIcon(category)}</span>
+          {#if showLabels || !isCollapsed}
+            <span class="category-label">{getCategoryLabel(category)}</span>
+          {/if}
+        </button>
+      {/each}
+    </div>
+    
+    <button
+      class="collapse-toggle"
+      on:click={toggleCollapse}
+      title={isCollapsed ? 'Show prompts' : 'Hide prompts'}
+      type="button"
+    >
+      {isCollapsed ? '▼' : '▲'}
+    </button>
   </div>
   
   {#if showPrompts}
@@ -121,6 +164,70 @@
     width: 100%;
   }
 
+  .prompts-header-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .random-prompt-header-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.2) 0%, rgba(255, 223, 0, 0.15) 100%);
+    border: 2px solid rgba(255, 193, 7, 0.4);
+    border-radius: 20px;
+    color: #4a3728;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.25s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(255, 193, 7, 0.15);
+  }
+
+  .random-prompt-header-btn:hover {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.3) 0%, rgba(255, 223, 0, 0.25) 100%);
+    border-color: rgba(255, 193, 7, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.25);
+  }
+
+  .random-icon {
+    font-size: 1.2rem;
+  }
+
+  .random-label {
+    font-weight: 600;
+  }
+
+  .prompts-intro {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0;
+    font-size: 0.9rem;
+    color: #4a3728;
+    opacity: 0.9;
+    font-weight: 500;
+    flex: 1;
+  }
+
+  .prompts-hint {
+    white-space: nowrap;
+  }
+
+  .categories-bar.collapsed + .collapse-toggle {
+    /* When collapsed, make the collapse button more prominent */
+  }
+
+  .categories-bar.collapsed ~ .prompts-intro {
+    /* Keep hint visible even when collapsed */
+    opacity: 1;
+  }
+
   .categories-bar {
     display: flex;
     gap: 0.5rem;
@@ -129,6 +236,44 @@
     scrollbar-width: thin;
     scrollbar-color: rgba(139, 115, 85, 0.3) transparent;
     -webkit-overflow-scrolling: touch;
+    flex: 1;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+  }
+
+  .categories-bar.collapsed {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    padding: 0;
+    margin: 0;
+  }
+
+  .prompts-container:has(.categories-bar.collapsed) .prompts-intro {
+    /* Make hint more prominent when prompts are collapsed */
+    font-weight: 600;
+    color: #4a3728;
+  }
+
+  .collapse-toggle {
+    padding: 0.625rem 0.75rem;
+    background: rgba(255, 255, 255, 0.6);
+    border: 2px solid rgba(139, 115, 85, 0.3);
+    border-radius: 20px;
+    color: #6b5743;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    min-width: 36px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .collapse-toggle:hover {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(139, 115, 85, 0.5);
   }
 
   .categories-bar::-webkit-scrollbar {
@@ -170,6 +315,14 @@
   .category-btn-bar.with-labels {
     padding: 0.625rem 1rem;
     min-width: auto;
+  }
+
+  .category-btn-bar:not(.with-labels):not(:hover) .category-label {
+    display: none;
+  }
+
+  .category-btn-bar:hover .category-label {
+    display: inline;
   }
 
   .category-btn-bar::before {
