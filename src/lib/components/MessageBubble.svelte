@@ -118,20 +118,20 @@
 
   /* Validator Mode: Lighter green bubbles, serious but softer tone */
   .bubble.assistant.validator-mode {
-    background: linear-gradient(135deg, rgba(220, 252, 231, 0.95) 0%, rgba(187, 247, 208, 0.95) 100%);
-    color: #166534;
-    border: 2px solid rgba(34, 197, 94, 0.3);
-    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(239, 250, 244, 0.97) 0%, rgba(214, 245, 225, 0.97) 100%);
+    color: #2e6942;
+    border: 2px solid rgba(46, 148, 99, 0.18);
+    border-radius: 18px;
     font-weight: 500;
   }
 
   /* Conflict Mode: Warm orange/amber bubbles, supportive but direct */
   .bubble.assistant.conflict-mode {
-    background: #c9732e;
-    color: #ffffff;
-    border: 1px solid #b8631e;
-    border-radius: 12px;
-    font-weight: 450;
+    background: linear-gradient(135deg, #fdebd3 0%, #f9d9b7 100%);
+    color: #7a3f0a;
+    border: 1px solid rgba(201, 115, 46, 0.35);
+    border-radius: 14px;
+    font-weight: 500;
   }
 
   .feedback-buttons {

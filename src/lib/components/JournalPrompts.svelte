@@ -1,4 +1,5 @@
 <script>
+  import { createEventDispatcher } from 'svelte';
   import { journalPrompts, getRandomPrompt } from '../prompts/JournalPrompts.js';
   
   export let onSelectPrompt = null; // Function to call when prompt is selected
@@ -6,13 +7,20 @@
   export let onCategoryChange = null; // Function to call when category changes
   export let showLabels = false; // Whether to show category labels (true for chat, false for diary)
   export let showRandomButton = true; // Whether to show the random button (false for diary mode, true for chat)
+  export let suggestedCategory = null; // Optional suggested category id (string)
   
+  const dispatch = createEventDispatcher();
+
   let showPrompts = false;
   let randomPrompt = '';
   let isCollapsed = false;
   
   $: if (showPrompts) {
     randomPrompt = getRandomPrompt();
+  }
+
+  $: if (suggestedCategory && !showPrompts && !isCollapsed) {
+    selectedCategory = suggestedCategory;
   }
   
   function selectPrompt(prompt) {
@@ -27,6 +35,8 @@
     isCollapsed = !isCollapsed;
     if (!isCollapsed) {
       showPrompts = false;
+    } else {
+      dispatch('collapse');
     }
   }
   
@@ -84,59 +94,81 @@
 </script>
 
 <div class="prompts-container">
-  <div class="prompts-header-bar">
-    {#if showRandomButton}
-      <button
-        class="random-prompt-header-btn"
-        on:click={showRandomPrompt}
-        title="Get a random writing prompt to help you start"
-        type="button"
-      >
-        <span class="random-icon">✨</span>
-        <span class="random-label">Random</span>
-      </button>
-    {/if}
-    
-    <div class="categories-bar" class:collapsed={isCollapsed}>
-      {#each Object.keys(journalPrompts) as category}
-        <button
-          class="category-btn-bar"
-          class:active={selectedCategory === category}
-          class:with-labels={showLabels}
-          on:click={() => {
-            selectCategory(category);
-            showPrompts = true;
-            isCollapsed = false;
-          }}
-          type="button"
-        >
-          <span class="category-icon">{getCategoryIcon(category)}</span>
-          {#if showLabels || !isCollapsed}
-            <span class="category-label">{getCategoryLabel(category)}</span>
-          {/if}
-          <span class="tooltip">
-            <span class="tooltip-title">{getCategoryLabel(category)}</span>
-            <span class="tooltip-description">{getCategoryDescription(category)}</span>
-          </span>
-        </button>
-      {/each}
+  <div class="prompts-header-bar" class:collapsed={isCollapsed}>
+    <div class="prompt-actions" class:collapsed={isCollapsed}>
+      {#if !isCollapsed}
+        <span class="prompt-label">Prompts</span>
+      {/if}
+      <div class="prompt-scroll">
+        {#if showRandomButton && !isCollapsed}
+          <button
+            class="random-prompt-header-btn"
+            on:click={showRandomPrompt}
+            title="Get a random writing prompt to help you start"
+            type="button"
+          >
+            <span class="random-icon">✨</span>
+            <span class="random-label">Random</span>
+          </button>
+        {/if}
+        
+        <div class="categories-bar">
+          {#each Object.keys(journalPrompts) as category}
+            <button
+              class="category-btn-bar"
+              class:active={selectedCategory === category}
+              class:suggested={suggestedCategory === category}
+              class:with-labels={showLabels}
+              on:click={() => {
+                selectCategory(category);
+                showPrompts = true;
+                isCollapsed = false;
+              }}
+              type="button"
+              title={getCategoryLabel(category)}
+            >
+              <span class="category-icon">{getCategoryIcon(category)}</span>
+              {#if showLabels || !isCollapsed}
+                <span class="category-label">{getCategoryLabel(category)}</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
     </div>
-    
+
     <button
       class="collapse-toggle"
       on:click={toggleCollapse}
       title={isCollapsed ? 'Show prompts' : 'Hide prompts'}
       type="button"
     >
-      {isCollapsed ? '▼' : '▲'}
+      {isCollapsed ? '▲' : '▼'}
     </button>
   </div>
   
   {#if showPrompts}
     <div class="prompts-modal">
       <div class="prompts-header">
-        <h3>{getCategoryLabel(selectedCategory)}</h3>
-        <button class="close-prompts" on:click={() => showPrompts = false} type="button">×</button>
+        <div class="header-left">
+          <span class="header-eyebrow">Prompt focus</span>
+          <div class="header-title-row">
+            <div class="category-chip">
+              <span class="chip-icon">{getCategoryIcon(selectedCategory)}</span>
+              <span class="chip-label">{getCategoryLabel(selectedCategory)}</span>
+            </div>
+            <span class="prompt-count">{(journalPrompts[selectedCategory] || []).length} prompts</span>
+          </div>
+          <p class="header-description">{getCategoryDescription(selectedCategory)}</p>
+        </div>
+        <button
+          class="close-prompts"
+          on:click={() => showPrompts = false}
+          type="button"
+          aria-label="Close prompts"
+        >
+          ×
+        </button>
       </div>
       
       {#if randomPrompt}
@@ -178,14 +210,90 @@
     gap: 0.5rem;
     width: 100%;
     overflow: visible;
+    --prompt-accent: #4aa06e;
+    --prompt-accent-strong: #3b8b5e;
+    --prompt-accent-bg: rgba(74, 160, 110, 0.22);
+    --prompt-accent-bg-strong: rgba(74, 160, 110, 0.3);
+    --prompt-suggest: #3a7bd5;
+    --prompt-suggest-bg: rgba(58, 123, 213, 0.18);
   }
 
   .prompts-header-bar {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: 0.35rem;
     width: 100%;
+  }
+
+  .prompts-header-bar.collapsed {
+    justify-content: flex-end;
+  }
+
+  .prompt-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    justify-content: center;
+    min-width: 0;
+    overflow: visible;
+    padding-bottom: 0.1rem;
+    flex: 1;
+  }
+
+  .prompt-actions.collapsed {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    padding: 0;
+    margin: 0;
+  }
+
+  .prompt-scroll {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: 0.25rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 115, 85, 0.3) transparent;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .prompt-scroll::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .prompt-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .prompt-scroll::-webkit-scrollbar-thumb {
+    background: rgba(139, 115, 85, 0.3);
+    border-radius: 2px;
+  }
+
+  .prompt-label {
+    font-size: 0.82rem;
+    font-weight: 650;
+    color: rgba(74, 55, 40, 0.75);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .suggested-chip {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--prompt-suggest);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    background: var(--prompt-suggest-bg);
+    border: 1px solid var(--prompt-suggest);
+    border-radius: 10px;
+    padding: 0.25rem 0.5rem;
   }
 
   .random-prompt-header-btn {
@@ -225,46 +333,32 @@
   .categories-bar {
     display: flex;
     gap: 0.5rem;
-    overflow-x: auto;
-    overflow-y: visible;
-    padding-bottom: 0.25rem;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(139, 115, 85, 0.3) transparent;
-    -webkit-overflow-scrolling: touch;
-    justify-content: center;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
     position: relative;
   }
 
-  .categories-bar.collapsed {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    padding: 0;
-    margin: 0;
-  }
-
-
   .collapse-toggle {
-    padding: 0.625rem 0.75rem;
-    background: rgba(255, 255, 255, 0.6);
-    border: 2px solid rgba(139, 115, 85, 0.3);
-    border-radius: 20px;
+    padding: 0.35rem;
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(139, 115, 85, 0.25);
+    border-radius: 12px;
     color: #6b5743;
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     transition: all 0.2s ease;
     flex-shrink: 0;
-    min-width: 36px;
-    height: 44px;
+    min-width: 30px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
+    margin-left: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
   }
 
   .collapse-toggle:hover {
-    background: rgba(255, 255, 255, 0.9);
-    border-color: rgba(139, 115, 85, 0.5);
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(139, 115, 85, 0.45);
+    transform: translateY(-1px);
   }
 
   .categories-bar::-webkit-scrollbar {
@@ -298,7 +392,7 @@
     flex-shrink: 0;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
     position: relative;
-    overflow: visible;
+    overflow: hidden;
     min-width: 44px;
     height: 44px;
     z-index: 1;
@@ -317,60 +411,6 @@
     display: none;
   }
 
-  .tooltip {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 0.75rem;
-    background: rgba(74, 55, 40, 0.98);
-    color: white;
-    font-size: 0.85rem;
-    border-radius: 8px;
-    white-space: normal;
-    width: max-content;
-    max-width: 220px;
-    min-width: 180px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-    transform: translateX(-50%) translateY(4px);
-    z-index: 1002;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    text-align: left;
-  }
-
-  .tooltip-title {
-    font-weight: 600;
-    font-size: 0.9rem;
-  }
-
-  .tooltip-description {
-    font-weight: 400;
-    font-size: 0.8rem;
-    opacity: 0.9;
-    line-height: 1.3;
-  }
-
-  .tooltip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-top-color: rgba(74, 55, 40, 0.95);
-  }
-
-  .category-btn-bar:hover .tooltip {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-    pointer-events: auto;
-  }
-
   .category-btn-bar::before {
     content: '';
     position: absolute;
@@ -380,6 +420,7 @@
     height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
     transition: left 0.5s ease;
+    pointer-events: none;
   }
 
   .category-btn-bar:hover::before {
@@ -399,16 +440,27 @@
   }
 
   .category-btn-bar.active {
-    background: linear-gradient(135deg, rgba(139, 115, 85, 0.2) 0%, rgba(107, 87, 67, 0.2) 100%);
-    border-color: rgba(139, 115, 85, 0.6);
-    color: #3a2e1e;
-    font-weight: 650;
-    box-shadow: 0 3px 10px rgba(139, 115, 85, 0.25);
+    background: linear-gradient(135deg, var(--prompt-accent-bg) 0%, var(--prompt-accent-bg) 100%);
+    border-color: rgba(74, 160, 110, 0.85);
+    color: var(--prompt-accent-strong);
+    font-weight: 700;
+    box-shadow: 0 3px 12px rgba(74, 160, 110, 0.32);
   }
 
   .category-btn-bar.active:hover {
-    background: linear-gradient(135deg, rgba(139, 115, 85, 0.25) 0%, rgba(107, 87, 67, 0.25) 100%);
-    border-color: rgba(139, 115, 85, 0.7);
+    background: linear-gradient(135deg, var(--prompt-accent-bg-strong) 0%, var(--prompt-accent-bg-strong) 100%);
+    border-color: rgba(74, 160, 110, 1);
+  }
+
+  .category-btn-bar.suggested:not(.active) {
+    background: linear-gradient(135deg, var(--prompt-suggest-bg) 0%, var(--prompt-suggest-bg) 100%);
+    border-color: rgba(58, 123, 213, 0.55);
+    color: #1f4f94;
+    box-shadow: 0 2px 10px rgba(58, 123, 213, 0.2);
+  }
+
+  .category-btn-bar.suggested:not(.active):hover {
+    border-color: rgba(58, 123, 213, 0.75);
   }
 
   .category-icon {
@@ -430,10 +482,10 @@
     left: 0;
     right: 0;
     margin-bottom: 0.5rem;
-    background: linear-gradient(135deg, #fffef9 0%, #fff9f0 100%);
-    border: 2px solid rgba(139, 115, 85, 0.3);
+    background: linear-gradient(135deg, #fdfbf7 0%, #fff7ec 100%);
+    border: 1px solid rgba(139, 115, 85, 0.25);
     border-radius: 16px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.12), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
     z-index: 1000;
     max-width: 400px;
     min-width: 300px;
@@ -456,38 +508,96 @@
   .prompts-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    gap: 1rem;
+    align-items: flex-start;
     padding: 1rem 1.5rem;
-    border-bottom: 2px solid rgba(139, 115, 85, 0.2);
-    background: linear-gradient(135deg, rgba(255, 248, 240, 0.8) 0%, rgba(255, 245, 230, 0.8) 100%);
+    border-bottom: 1px solid rgba(139, 115, 85, 0.18);
+    background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.6), transparent 55%), linear-gradient(135deg, rgba(255, 248, 240, 0.95) 0%, rgba(255, 243, 230, 0.9) 100%);
   }
 
-  .prompts-header h3 {
-    margin: 0;
-    color: #4a3728;
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .header-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(74, 55, 40, 0.7);
+  }
+
+  .header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .category-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    background: #fffdf8;
+    border: 1px solid rgba(139, 115, 85, 0.25);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05), 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+    color: #3a2e1e;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+  }
+
+  .chip-icon {
     font-size: 1.1rem;
-    font-weight: 600;
+    line-height: 1;
+  }
+
+  .chip-label {
+    font-size: 0.95rem;
+  }
+
+  .prompt-count {
+    font-size: 0.82rem;
+    color: rgba(74, 55, 40, 0.7);
+    padding: 0.25rem 0.5rem;
+    border-radius: 10px;
+    background: rgba(139, 115, 85, 0.08);
+    border: 1px solid rgba(139, 115, 85, 0.15);
+  }
+
+  .header-description {
+    margin: 0;
+    color: rgba(58, 46, 30, 0.95);
+    font-size: 0.9rem;
+    line-height: 1.35;
+    max-width: 28rem;
   }
 
   .close-prompts {
-    background: transparent;
-    border: none;
-    font-size: 1.5rem;
-    color: #6b5743;
+    background: #fff;
+    border: 1px solid rgba(139, 115, 85, 0.35);
+    font-size: 1.15rem;
+    color: #5b4734;
     cursor: pointer;
     line-height: 1;
-    padding: 0;
-    width: 24px;
-    height: 24px;
-    display: flex;
+    padding: 0.3rem;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
-    transition: background 0.2s ease;
+    border-radius: 12px;
+    transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.07);
   }
 
   .close-prompts:hover {
-    background: rgba(107, 87, 67, 0.1);
+    background: rgba(139, 115, 85, 0.12);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 18px rgba(0, 0, 0, 0.1);
   }
 
   .random-prompt-section {
@@ -561,4 +671,3 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   }
 </style>
-

@@ -41,20 +41,41 @@ export class MetricsCollector {
     return history.filter(m => new Date(m.timestamp) >= cutoffDate);
   }
 
-  getAverageStressLevel(days = 7) {
-    const recent = this.getRecentMetrics(days);
-    if (recent.length === 0) return 5;
-    
-    const sum = recent.reduce((acc, m) => acc + (m.stressLevel || 5), 0);
-    return sum / recent.length;
+  getWeight(timestamp, halfLifeDays = 7) {
+    const now = Date.now();
+    const ts = timestamp ? new Date(timestamp).getTime() : now;
+    if (Number.isNaN(ts)) return 1;
+    const ageDays = (now - ts) / (1000 * 60 * 60 * 24);
+    const decay = Math.pow(0.5, ageDays / halfLifeDays);
+    return Math.max(decay, 0.05); // avoid zero weight
   }
 
-  getAverageLonelinessLevel(days = 7) {
+  getAverageStressLevel(days = 30) {
     const recent = this.getRecentMetrics(days);
     if (recent.length === 0) return 5;
     
-    const sum = recent.reduce((acc, m) => acc + (m.lonelinessLevel || 5), 0);
-    return sum / recent.length;
+    let weightedSum = 0;
+    let weightTotal = 0;
+    recent.forEach((m) => {
+      const w = this.getWeight(m.timestamp);
+      weightedSum += (m.stressLevel ?? 5) * w;
+      weightTotal += w;
+    });
+    return weightTotal > 0 ? weightedSum / weightTotal : 5;
+  }
+
+  getAverageLonelinessLevel(days = 30) {
+    const recent = this.getRecentMetrics(days);
+    if (recent.length === 0) return 5;
+    
+    let weightedSum = 0;
+    let weightTotal = 0;
+    recent.forEach((m) => {
+      const w = this.getWeight(m.timestamp);
+      weightedSum += (m.lonelinessLevel ?? 5) * w;
+      weightTotal += w;
+    });
+    return weightTotal > 0 ? weightedSum / weightTotal : 5;
   }
 
   getSentimentTrend(days = 7) {
@@ -84,12 +105,12 @@ export class MetricsCollector {
   }
 
   getEmotionalInsights() {
-    const recent = this.getRecentMetrics(7);
+    const recent = this.getRecentMetrics(30);
     if (recent.length === 0) return null;
 
-    const avgStress = this.getAverageStressLevel(7);
-    const avgLoneliness = this.getAverageLonelinessLevel(7);
-    const sentimentTrend = this.getSentimentTrend(7);
+    const avgStress = this.getAverageStressLevel(30);
+    const avgLoneliness = this.getAverageLonelinessLevel(30);
+    const sentimentTrend = this.getSentimentTrend(30);
     const connectionEncouragements = recent.filter(m => m.encouragesConnection).length;
 
     return {
@@ -99,5 +120,37 @@ export class MetricsCollector {
       connectionEncouragements,
       totalInteractions: recent.length
     };
+  }
+
+  getSuggestedPromptCategory() {
+    const recent = this.getRecentMetrics(30);
+    if (recent.length === 0) return 'daily';
+
+    // Weight by recency
+    let stressScore = 0;
+    let lonelyScore = 0;
+    let homesickScore = 0;
+    let negSentiment = 0;
+    let weightTotal = 0;
+
+    recent.forEach((m) => {
+      const w = this.getWeight(m.timestamp);
+      stressScore += (m.stressLevel ?? 5) * w;
+      lonelyScore += (m.lonelinessLevel ?? 5) * w;
+      homesickScore += (m.homesicknessLevel ?? 5) * w;
+      negSentiment += (m.sentiment === 'negative' ? 1 : 0) * w;
+      weightTotal += w;
+    });
+
+    const stressAvg = weightTotal ? stressScore / weightTotal : 5;
+    const lonelyAvg = weightTotal ? lonelyScore / weightTotal : 5;
+    const homesickAvg = weightTotal ? homesickScore / weightTotal : 5;
+    const negAvg = weightTotal ? negSentiment / weightTotal : 0;
+
+    if (homesickAvg >= 7 || (homesickAvg > lonelyAvg && homesickAvg >= 6)) return 'homesickness';
+    if (lonelyAvg >= 7) return 'relationships';
+    if (stressAvg >= 7) return 'challenges';
+    if (negAvg >= 0.4) return 'reflection';
+    return 'daily';
   }
 }

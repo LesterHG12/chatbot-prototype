@@ -13,6 +13,30 @@
     showPrompts = false;
   }
   
+  function getCategoryLabel(category) {
+    const labels = {
+      daily: 'Daily Check-in',
+      reflection: 'Deep Reflection',
+      emotional: 'Emotions',
+      relationships: 'Relationships',
+      challenges: 'Challenges',
+      homesickness: 'Homesickness'
+    };
+    return labels[category] || category;
+  }
+
+  function getCategoryDescription(category) {
+    const descriptions = {
+      daily: 'Quick prompts for daily thoughts and experiences',
+      reflection: 'Thoughtful prompts for deeper self-exploration',
+      emotional: 'Prompts to explore and understand your feelings',
+      relationships: 'Prompts about connections with others',
+      challenges: 'Prompts for navigating difficulties and obstacles',
+      homesickness: 'Prompts about missing home and adjusting to new places'
+    };
+    return descriptions[category] || '';
+  }
+  
   function getCategoryIcon(category) {
     const icons = {
       daily: '📅',
@@ -39,8 +63,25 @@
   {#if showPrompts}
     <div class="prompts-modal-diary">
       <div class="prompts-header-diary">
-        <h4>Journal Prompts</h4>
-        <button class="close-prompts" on:click={() => showPrompts = false} type="button">×</button>
+        <div class="header-left">
+          <span class="header-eyebrow">Prompt focus</span>
+          <div class="header-title-row">
+            <div class="category-chip compact">
+              <span class="chip-icon">{getCategoryIcon(selectedCategory)}</span>
+              <span class="chip-label">{getCategoryLabel(selectedCategory)}</span>
+            </div>
+            <span class="prompt-count">{(journalPrompts[selectedCategory] || []).length} prompts</span>
+          </div>
+          <p class="header-description">{getCategoryDescription(selectedCategory)}</p>
+        </div>
+        <button
+          class="close-prompts close-prompts-compact"
+          on:click={() => showPrompts = false}
+          type="button"
+          aria-label="Close prompts"
+        >
+          ×
+        </button>
       </div>
       
       <div class="prompts-categories-diary">
@@ -103,9 +144,9 @@
     right: 1.5rem;
     margin-bottom: 0.5rem;
     background: linear-gradient(135deg, #fffef9 0%, #fff9f0 100%);
-    border: 2px solid rgba(139, 115, 85, 0.3);
+    border: 1px solid rgba(139, 115, 85, 0.25);
     border-radius: 12px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.12), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
     z-index: 100;
     max-height: 300px;
     display: flex;
@@ -116,31 +157,102 @@
   .prompts-header-diary {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid rgba(139, 115, 85, 0.2);
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid rgba(139, 115, 85, 0.18);
+    background: linear-gradient(135deg, rgba(255, 248, 240, 0.95) 0%, rgba(255, 243, 230, 0.9) 100%);
   }
 
-  .prompts-header-diary h4 {
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .header-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: rgba(74, 55, 40, 0.7);
+  }
+
+  .header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .category-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: #fffdf8;
+    border: 1px solid rgba(139, 115, 85, 0.25);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.05), 0 1px 0 rgba(255, 255, 255, 0.75) inset;
+    color: #3a2e1e;
+    font-weight: 650;
+  }
+
+  .category-chip.compact {
+    padding: 0.3rem 0.65rem;
+  }
+
+  .chip-icon {
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  .chip-label {
+    font-size: 0.9rem;
+  }
+
+  .prompt-count {
+    font-size: 0.78rem;
+    color: rgba(74, 55, 40, 0.75);
+    padding: 0.2rem 0.45rem;
+    border-radius: 10px;
+    background: rgba(139, 115, 85, 0.08);
+    border: 1px solid rgba(139, 115, 85, 0.12);
+  }
+
+  .header-description {
     margin: 0;
-    color: #4a3728;
-    font-size: 0.95rem;
-    font-weight: 600;
+    color: rgba(58, 46, 30, 0.95);
+    font-size: 0.85rem;
+    line-height: 1.3;
   }
 
   .close-prompts {
-    background: transparent;
-    border: none;
-    font-size: 1.25rem;
-    color: #6b5743;
+    background: #fff;
+    border: 1px solid rgba(139, 115, 85, 0.35);
+    font-size: 1rem;
+    color: #5b4734;
     cursor: pointer;
     line-height: 1;
-    padding: 0;
-    width: 20px;
-    height: 20px;
-    display: flex;
+    padding: 0.25rem;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    border-radius: 10px;
+    transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.07);
+  }
+
+  .close-prompts-compact {
+    margin-top: 0.1rem;
+  }
+
+  .close-prompts:hover {
+    background: rgba(139, 115, 85, 0.12);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 18px rgba(0, 0, 0, 0.1);
   }
 
   .prompts-categories-diary {

@@ -3,11 +3,15 @@
   import { DiaryStore } from '../diary/DiaryStore.js';
   import JournalPrompts from './JournalPrompts.svelte';
   import ToastNotification from './ToastNotification.svelte';
+  import { MetricsCollector } from '../metrics/MetricsCollector.js';
   import { getRandomPrompt } from '../prompts/JournalPrompts.js';
   import { onMount } from 'svelte';
+  import { PeopleStore } from '../people/PeopleStore.js';
 
   const dispatch = createEventDispatcher();
   const diaryStore = new DiaryStore();
+  const peopleStore = new PeopleStore();
+  const metricsCollector = new MetricsCollector();
   
   let selectedDate = '';
   let entryText = '';
@@ -28,11 +32,18 @@
   let contextMenuX = 0;
   let contextMenuY = 0;
   let lastFocusedSide = 'left'; // Track which textarea was last focused: 'left' or 'right'
+  let leftLastSavedAt = null;
+  let rightLastSavedAt = null;
+  let nameSuggestions = [];
+  let showPromptsTray = false;
+  let showPrivacyReminder = false;
+  let suggestedPromptCategory = 'daily';
 
   onMount(() => {
     // Set to today's date by default
     selectedDate = diaryStore.formatDate();
     // loadEntry will be called by reactive statement
+    suggestedPromptCategory = metricsCollector.getSuggestedPromptCategory();
   });
 
   function loadEntry() {
@@ -61,6 +72,7 @@
       wordCount: diaryStore.getWordCount(nextEntryText),
       isPrivate: nextMetadata.isPrivate || false
     };
+    updateNameSuggestions();
   }
 
   function saveEntry() {
@@ -170,6 +182,16 @@
     toastVisible = true;
   }
 
+  function formatSaveTimestamp(date) {
+    if (!date) return '';
+    const now = Date.now();
+    const diffMs = now - date.getTime();
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return 'Saved just now';
+    if (diffMinutes < 60) return `Saved ${diffMinutes}m ago`;
+    return `Saved at ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  }
+
   async function extractMoodFromText(text, date) {
     if (!text || text.trim().length < 10) return; // Skip if text is too short
     
@@ -217,13 +239,16 @@
         const wordCount = diaryStore.getWordCount(entryText);
         diaryStore.saveMetadata(selectedDate, { wordCount });
         leftEntryMetadata.wordCount = wordCount;
+        leftLastSavedAt = new Date();
         showToast('Entry saved', 'success');
+        updateNameSuggestions();
         
         // Extract mood from text automatically
         await extractMoodFromText(entryText, selectedDate);
       } else {
         // Auto-delete if entry is empty
         diaryStore.deleteEntry(selectedDate);
+        updateNameSuggestions();
       }
       dispatch('entrySaved');
     }, 500);
@@ -237,13 +262,16 @@
         const wordCount = diaryStore.getWordCount(nextEntryText);
         diaryStore.saveMetadata(nextDate, { wordCount });
         rightEntryMetadata.wordCount = wordCount;
+        rightLastSavedAt = new Date();
         showToast('Entry saved', 'success');
+        updateNameSuggestions();
         
         // Extract mood from text automatically
         await extractMoodFromText(nextEntryText, nextDate);
       } else {
         // Auto-delete if entry is empty
         diaryStore.deleteEntry(nextDate);
+        updateNameSuggestions();
       }
       dispatch('entrySaved');
     }, 500);
@@ -273,6 +301,117 @@
     }
     
     showToast(newPrivateState ? 'Entry marked as private' : 'Entry marked as public', 'info');
+    showPrivacyReminder = newPrivateState;
+  }
+
+  // --- People detection and Stay Connected integration ---
+  function getStoredReminders() {
+    if (typeof window === 'undefined') return [];
+    try {
+      const stored = localStorage.getItem('connection_reminders');
+      return stored ? JSON.parse(stored) : [];
+    } catch (err) {
+      console.error('Error reading connection reminders:', err);
+      return [];
+    }
+  }
+
+  function saveReminders(reminders) {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('connection_reminders', JSON.stringify(reminders));
+    } catch (err) {
+      console.error('Error saving connection reminders:', err);
+    }
+  }
+
+  function calculateDaysSinceDate(dateString) {
+    if (!dateString) return 999;
+    const date = new Date(dateString + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diff = today - date;
+    return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+  }
+
+  function addReminderIfMissing(name, lastContactDate) {
+    if (!name || !name.trim()) return;
+    const reminders = getStoredReminders();
+    const exists = reminders.some((r) => r.name.toLowerCase() === name.trim().toLowerCase());
+    if (exists) return;
+    const daysSince = lastContactDate ? calculateDaysSinceDate(lastContactDate) : 999;
+    reminders.push({
+      id: Date.now(),
+      name: name.trim(),
+      type: 'friend',
+      emoji: '🤝',
+      daysSince,
+      lastContact: lastContactDate || null
+    });
+    saveReminders(reminders);
+  }
+
+  function extractNamesFromText(text) {
+    if (!text) return [];
+    const stop = new Set([
+      'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday',
+      'Today','Yesterday','Entry','January','February','March','April','May',
+      'June','July','August','September','October','November','December',
+      'Hello','Hi','Hey','Thanks','Thank','Dear','Best','Regards','Morning',
+      'Afternoon','Evening','Tonight','Tomorrow','Noon','Home','School','University','College',
+      'Class','Chapter','Page','Something','Nothing','Anything','Everything','Comfort',
+      'Support','Project','Assignment','Homework','Lecture','Session','Meeting','Dinner',
+      'Lunch','Breakfast','Brunch','Coffee','Teacher','Professor','Coach','Team','Group',
+      'Party','Concert','Trip','Travel','Vacation','Holiday','Campus','Library','Gym',
+      'Study','Exam','Final','Midterm'
+    ]);
+    const candidates = [];
+    const regex = /\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?/g;
+    const matches = text.matchAll(regex);
+    for (const match of matches) {
+      let name = match[0].trim().replace(/[.,!?;:]+$/, '');
+      if (!name || name.length > 30) continue;
+      if (stop.has(name)) continue;
+      // Prefer two-word names; allow single-word if not in stop-list and not a generic noun shape
+      const isTwoWord = name.includes(' ');
+      const hasVowel = /[aeiou]/i.test(name);
+      if (!isTwoWord && !hasVowel) continue;
+      candidates.push(name);
+    }
+    return Array.from(new Set(candidates));
+  }
+
+  function buildSnippetForName(name) {
+    const combined = `${entryText}\n\n${nextEntryText}`.trim();
+    if (!combined) return '';
+    const sentences = combined.split(/(?<=[.!?])\s+/);
+    const found = sentences.find((s) => s.includes(name));
+    const target = found || combined;
+    return target.substring(0, 220);
+  }
+
+  function updateNameSuggestions() {
+    const names = [
+      ...extractNamesFromText(entryText),
+      ...extractNamesFromText(nextEntryText)
+    ];
+    const uniqueNames = Array.from(new Set(names.map((n) => n.trim()))).filter(Boolean);
+    const existingReminders = getStoredReminders().map((r) => r.name.toLowerCase());
+    const existingProfiles = peopleStore.listNames().map((n) => n.toLowerCase());
+    nameSuggestions = uniqueNames.filter(
+      (n) => !existingReminders.includes(n.toLowerCase()) && !existingProfiles.includes(n.toLowerCase())
+    );
+  }
+
+  function addPersonFromDiary(name) {
+    if (!name) return;
+    const mentionDate = entryText.includes(name) ? selectedDate : nextEntryText.includes(name) ? nextDate : diaryStore.formatDate();
+    const snippet = buildSnippetForName(name);
+    peopleStore.upsertPerson(name, { notes: snippet, lastMentioned: mentionDate, type: 'friend' });
+    peopleStore.addActivity(name, { date: mentionDate, summary: snippet || 'Mentioned in diary', feelings: '' });
+    addReminderIfMissing(name, mentionDate);
+    nameSuggestions = nameSuggestions.filter((n) => n !== name);
+    showToast(`${name} added to Stay Connected`, 'info');
   }
 
 
@@ -443,23 +582,58 @@
     </button>
   </div>
 
-  <!-- Single prompts component for both pages -->
-  <div class="global-prompts-container">
-    <JournalPrompts 
-      onSelectPrompt={(prompt) => {
-        // Add prompt to the side that was last focused
-        if (lastFocusedSide === 'right') {
-          handleNextPromptSelected(prompt);
-        } else {
-          handlePromptSelected(prompt);
-        }
-      }}
-      bind:selectedCategory={selectedCategory}
-      onCategoryChange={handleCategoryChange}
-      showLabels={false}
-      showRandomButton={true}
-    />
-  </div>
+  {#if nameSuggestions.length > 0}
+    <div class="people-suggestion-bar">
+      <span class="suggestion-label">Stay Connected:</span>
+      {#each nameSuggestions as name}
+        <button class="suggestion-chip" on:click={() => addPersonFromDiary(name)} type="button">
+          Add {name}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  <button
+    class="prompt-launcher"
+    on:click={() => showPromptsTray = !showPromptsTray}
+    aria-expanded={showPromptsTray}
+    type="button"
+  >
+    ✨ Prompts
+  </button>
+
+  {#if showPromptsTray}
+    <div class="global-prompts-container">
+      <JournalPrompts 
+        onSelectPrompt={(prompt) => {
+          // Add prompt to the side that was last focused
+          if (lastFocusedSide === 'right') {
+            handleNextPromptSelected(prompt);
+          } else {
+            handlePromptSelected(prompt);
+          }
+          showPromptsTray = false;
+        }}
+        bind:selectedCategory={selectedCategory}
+        onCategoryChange={handleCategoryChange}
+        showLabels={false}
+        showRandomButton={true}
+        on:collapse={() => showPromptsTray = false}
+        suggestedCategory={suggestedPromptCategory}
+      />
+    </div>
+  {/if}
+
+  {#if showPrivacyReminder}
+    <div class="privacy-reminder">
+      <span class="privacy-emoji">🔒</span>
+      <div class="privacy-copy">
+        <div class="privacy-title">Private entry</div>
+        <div class="privacy-desc">Private entries stay on your device and won't be shared with the chatbot unless you unmark them.</div>
+      </div>
+      <button class="privacy-close" on:click={() => showPrivacyReminder = false} type="button" aria-label="Close privacy reminder">×</button>
+    </div>
+  {/if}
 
   <div class="diary-pages-container">
     {#if showCalendar}
@@ -510,6 +684,9 @@
           
           <div class="date-display">
             <h2 class="date-title">{formattedDate}</h2>
+            {#if formatSaveTimestamp(leftLastSavedAt)}
+              <div class="save-indicator" aria-live="polite">{formatSaveTimestamp(leftLastSavedAt)}</div>
+            {/if}
           </div>
 
           <div class="entry-actions-left">
@@ -589,6 +766,9 @@
         
         <div class="date-display">
           <h2 class="date-title">{formatDateDisplay(nextDate)}</h2>
+          {#if formatSaveTimestamp(rightLastSavedAt)}
+            <div class="save-indicator" aria-live="polite">{formatSaveTimestamp(rightLastSavedAt)}</div>
+          {/if}
         </div>
 
         <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -712,6 +892,41 @@
     z-index: 5;
   }
 
+  .people-suggestion-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(139, 115, 85, 0.25);
+    border-radius: 12px;
+    padding: 0.5rem 0.75rem;
+    margin: 0 1rem 0.5rem;
+  }
+
+  .suggestion-label {
+    font-size: 0.9rem;
+    font-weight: 650;
+    color: rgba(74, 55, 40, 0.8);
+  }
+
+  .suggestion-chip {
+    border: 1px solid rgba(139, 115, 85, 0.3);
+    background: rgba(139, 115, 85, 0.08);
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color: #4a3728;
+    transition: all 0.2s ease;
+  }
+
+  .suggestion-chip:hover {
+    background: rgba(139, 115, 85, 0.15);
+    border-color: rgba(139, 115, 85, 0.5);
+    transform: translateY(-1px);
+  }
+
   .calendar-toggle-top {
     padding: 0.75rem 1.5rem;
     background: rgba(139, 115, 85, 0.2);
@@ -749,24 +964,25 @@
   .global-prompts-container {
     position: absolute;
     bottom: 1rem;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 100;
-    width: calc(100% - 4rem);
-    max-width: 1000px;
+    left: 2rem;
+    right: 2rem;
+    z-index: 120;
     pointer-events: none;
+    transform: translateY(0);
+    opacity: 1;
   }
 
-  .global-prompts-container :global(.prompts-container) {
+  :global(.prompts-container) {
     pointer-events: all;
     background: linear-gradient(135deg, rgba(255, 254, 249, 0.98) 0%, rgba(255, 249, 240, 0.98) 100%);
     border: 2px solid rgba(139, 115, 85, 0.3);
     border-radius: 16px;
-    padding: 0.75rem;
+    padding: 0.6rem 0.75rem 0.5rem;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
     backdrop-filter: blur(10px);
-    position: relative;
     overflow: visible;
+    width: 100%;
+    animation: fadeInUp 0.18s ease;
   }
 
   .calendar-toggle-top:hover {
@@ -774,6 +990,94 @@
     border-color: rgba(139, 115, 85, 0.6);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .prompt-launcher {
+    position: absolute;
+    bottom: 1rem;
+    right: 1.5rem;
+    padding: 0.6rem 0.9rem;
+    border-radius: 12px;
+    border: 1px solid rgba(139, 115, 85, 0.35);
+    background: rgba(255, 255, 255, 0.9);
+    color: #4a3728;
+    cursor: pointer;
+    font-weight: 650;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    z-index: 110;
+  }
+
+  .prompt-launcher:hover {
+    background: rgba(255, 255, 255, 1);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
+  }
+
+  .privacy-reminder {
+    position: fixed;
+    bottom: 1rem;
+    left: 1rem;
+    right: 1rem;
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: linear-gradient(135deg, #f7f9ff 0%, #eef2ff 100%);
+    border: 1px solid rgba(79, 70, 229, 0.25);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+    z-index: 2000;
+    animation: fadeInUp 0.2s ease;
+  }
+
+  .privacy-emoji {
+    font-size: 1.25rem;
+  }
+
+  .privacy-copy {
+    flex: 1;
+  }
+
+  .privacy-title {
+    font-weight: 700;
+    color: #1f2937;
+    font-size: 0.95rem;
+  }
+
+  .privacy-desc {
+    font-size: 0.85rem;
+    color: #4b5563;
+    line-height: 1.4;
+  }
+
+  .privacy-close {
+    background: transparent;
+    border: none;
+    font-size: 1.25rem;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 8px;
+    transition: background 0.2s ease;
+  }
+
+  .privacy-close:hover {
+    background: rgba(107, 114, 128, 0.1);
+  }
+
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .diary-pages-container {
@@ -851,8 +1155,16 @@
     font-size: 1.1rem;
     font-weight: 500;
     color: rgba(74, 55, 40, 0.8);
-    font-family: 'Georgia', serif;
+    font-family: 'Segoe Script', 'Bradley Hand', 'Comic Sans MS', 'Georgia', serif;
     letter-spacing: 0.3px;
+  }
+
+  .save-indicator {
+    margin-top: 0.2rem;
+    font-size: 0.8rem;
+    color: rgba(74, 55, 40, 0.65);
+    font-weight: 500;
+    letter-spacing: 0.01em;
   }
 
   .nav-arrow {
@@ -1028,7 +1340,7 @@
     color: #2d1f14;
     font-size: 1rem;
     line-height: 32px;
-    font-family: 'Georgia', 'Times New Roman', serif;
+    font-family: 'Segoe Script', 'Bradley Hand', 'Comic Sans MS', 'Georgia', 'Times New Roman', serif;
     resize: none;
     min-height: 400px;
     outline: none;

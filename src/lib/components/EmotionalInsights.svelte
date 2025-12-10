@@ -1,9 +1,11 @@
 <script>
   import { MetricsCollector } from '../metrics/MetricsCollector.js';
+  import { DiaryStore } from '../diary/DiaryStore.js';
   import { onMount } from 'svelte';
 
   let insights = null;
   const metricsCollector = new MetricsCollector();
+  const diaryStore = new DiaryStore();
 
   onMount(() => {
     updateInsights();
@@ -11,6 +13,7 @@
 
   function updateInsights() {
     insights = metricsCollector.getEmotionalInsights();
+    insights.relationships = getRelationshipInsights();
     
     // Add feedback statistics
     if (typeof window !== 'undefined') {
@@ -30,6 +33,34 @@
         console.error('Error loading feedback stats:', err);
       }
     }
+  }
+
+  function getRelationshipInsights() {
+    const entries = diaryStore.getAllEntries();
+    const meta = diaryStore.getAllMetadata();
+    const now = new Date();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 60);
+    const keywords = ['relationship', 'friend', 'family', 'partner', 'roommate', 'conflict', 'talk', 'mom', 'dad', 'sibling'];
+    let count = 0;
+    const dates = [];
+
+    for (const [date, content] of Object.entries(entries)) {
+      const m = meta[date] || {};
+      if (!content || !content.trim() || m.isPrivate) continue;
+      const d = new Date(date + 'T00:00:00');
+      if (d < cutoff || d > now) continue;
+      const lower = content.toLowerCase();
+      if (keywords.some(k => lower.includes(k))) {
+        count += 1;
+        dates.push(date);
+      }
+    }
+
+    return {
+      count,
+      recentExample: dates.sort().slice(-1)[0] || null
+    };
   }
 
   export function refresh() {
@@ -62,10 +93,11 @@
       <h3>Your Emotional Journey 💙</h3>
       <button class="refresh-btn" on:click={updateInsights} title="Refresh">🔄</button>
     </div>
+    <div class="insights-subhead">Insights use recent (weighted) chat metrics and non-private diary entries. Favorites are manually chosen.</div>
 
     <div class="insights-grid">
       <div class="insight-item">
-        <div class="insight-label">Average Stress (7 days)</div>
+        <div class="insight-label">Weighted Stress (30 days, recent heavier)</div>
         <div class="insight-value" style="color: {getLevelColor(insights.avgStress)}">
           {insights.avgStress}/10
         </div>
@@ -78,7 +110,7 @@
       </div>
 
       <div class="insight-item">
-        <div class="insight-label">Average Loneliness (7 days)</div>
+        <div class="insight-label">Weighted Loneliness (30 days, recent heavier)</div>
         <div class="insight-value" style="color: {getLevelColor(insights.avgLoneliness)}">
           {insights.avgLoneliness}/10
         </div>
@@ -91,9 +123,12 @@
       </div>
 
       <div class="insight-item">
-        <div class="insight-label">Sentiment Trend</div>
-        <div class="insight-value" style="color: {getSentimentTrendColor(insights.sentimentTrend)}">
-          {getSentimentTrendIcon(insights.sentimentTrend)} {insights.sentimentTrend}
+        <div class="insight-label">Conversation Count (30 days)</div>
+        <div class="insight-value">
+          {insights.totalInteractions}
+        </div>
+        <div class="insight-note">
+          More check-ins give a clearer picture; consider short daily notes.
         </div>
       </div>
 
@@ -107,6 +142,20 @@
             Great job! Keep reaching out to friends and family.
           {:else}
             Remember: reaching out to loved ones can help when you're feeling isolated.
+          {/if}
+        </div>
+      </div>
+
+      <div class="insight-item">
+        <div class="insight-label">Relationships Spotlight (60 days, non-private)</div>
+        <div class="insight-value">
+          {insights.relationships?.count || 0} mentions
+        </div>
+        <div class="insight-note">
+          {#if insights.relationships?.recentExample}
+            Last noted on {insights.relationships.recentExample}. Consider revisiting or sharing with someone you trust.
+          {:else}
+            Add a short note about key people to build patterns over time.
           {/if}
         </div>
       </div>
@@ -150,6 +199,12 @@
     margin-bottom: 1.5rem;
     padding-bottom: 1rem;
     border-bottom: 2px solid rgba(139, 115, 85, 0.2);
+  }
+
+  .insights-subhead {
+    font-size: 0.85rem;
+    color: #6b5743;
+    margin: -0.75rem 0 1rem 0;
   }
 
   .insights-header h3 {

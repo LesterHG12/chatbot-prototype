@@ -83,23 +83,35 @@ export class DiaryStore {
   }
 
   // Get entries formatted for agent context (excluding private entries)
-  getContextForAgents(limit = 5) {
-    const recentEntries = this.getRecentEntries(limit);
-    if (recentEntries.length === 0) return '';
+  // If anchorDate is provided, include that day's entry and the nearest recent public entries
+  getContextForAgents(limit = 5, anchorDate = null) {
+    if (typeof window === 'undefined') return '';
+    const allEntries = this.getAllEntries();
+    const dates = Object.keys(allEntries)
+      .filter((date) => {
+        const content = allEntries[date];
+        const metadata = this.getMetadata(date);
+        return content && content.trim().length > 0 && !metadata.isPrivate;
+      })
+      .sort((a, b) => new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00'));
 
-    // Filter out private entries
-    const publicEntries = recentEntries.filter(entry => {
-      const metadata = this.getMetadata(entry.date);
-      return !metadata.isPrivate;
-    });
+    if (dates.length === 0) return '';
 
-    if (publicEntries.length === 0) return '';
+    const selected = [];
 
-    const contextParts = publicEntries.map(entry => 
-      `Date: ${entry.date}\n${entry.content}`
-    );
+    // Include anchor first if provided and public
+    if (anchorDate && allEntries[anchorDate] && !this.getMetadata(anchorDate).isPrivate) {
+      selected.push(anchorDate);
+    }
 
-    return `Previous diary entries for context:\n\n${contextParts.join('\n\n---\n\n')}`;
+    for (const d of dates) {
+      if (selected.length >= limit) break;
+      if (anchorDate && d === anchorDate) continue;
+      selected.push(d);
+    }
+
+    const contextParts = selected.map((date) => `Date: ${date}\n${allEntries[date]}`);
+    return `Diary context for chat:\n\n${contextParts.join('\n\n---\n\n')}`;
   }
 
   // Format date as YYYY-MM-DD

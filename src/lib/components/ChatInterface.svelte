@@ -1,10 +1,12 @@
-<script>
+﻿<script>
   import { onMount } from 'svelte';
   import MessageBubble from './MessageBubble.svelte';
   import JournalPrompts from './JournalPrompts.svelte';
   import { MetricsCollector } from '../metrics/MetricsCollector.js';
   import { DiaryStore } from '../diary/DiaryStore.js';
   import { ChatStore } from '../chat/ChatStore.js';
+  import { PeopleStore } from '../people/PeopleStore.js';
+  import { EventStore } from '../events/EventStore.js';
   
   export let diaryContext = '';
   export let includeTodayEntry = false; // Option to include today's entry explicitly
@@ -27,10 +29,16 @@
   let chatSessions = [];
   let deletingSessionId = null; // Track which session is being deleted
   let abortController = null; // Track current fetch request for cancellation
+  let suggestedPromptCategory = 'daily';
+  let summarySaving = false;
+  let summaryMessage = '';
+  let pendingEventCheck = false;
   
   const metricsCollector = new MetricsCollector();
   const diaryStore = new DiaryStore();
   const chatStore = new ChatStore();
+  const peopleStore = new PeopleStore();
+  const eventStore = new EventStore();
 
   function loadAvailableEntries() {
     const allEntries = diaryStore.getAllEntries();
@@ -82,13 +90,9 @@
     if (entry.date === today) {
       includeTodayEntry = true;
     } else {
-      // Otherwise, add it to diary context manually
-      if (!diaryContext.includes(entry.date)) {
-        const entryContext = `Date: ${entry.date}\n${entry.content}`;
-        diaryContext = diaryContext 
-          ? `${diaryContext}\n\n---\n\n${entryContext}`
-          : entryContext;
-      }
+      // Otherwise, rebuild context centered on this date
+      diaryContext = diaryStore.getContextForAgents(5, entry.date);
+      includeTodayEntry = false;
     }
     
     showImportDiary = false;
@@ -114,10 +118,8 @@
       if (date === today) {
         includeTodayEntry = true;
       } else {
-        const entryContext = `Date: ${date}\n${entry}`;
-        diaryContext = diaryContext 
-          ? `${diaryContext}\n\n---\n\n${entryContext}`
-          : entryContext;
+        diaryContext = diaryStore.getContextForAgents(5, date);
+        includeTodayEntry = false;
       }
       
       // Save to current session
@@ -170,13 +172,19 @@
           ? `${contextToSend}\n\n---\n\n${todayEntryContext}`
           : todayEntryContext;
       }
+      const peopleContext = peopleStore.getContextForAgents();
+      const combinedContext = peopleContext
+        ? contextToSend
+          ? `${contextToSend}\n\n---\n\n${peopleContext}`
+          : peopleContext
+        : contextToSend;
 
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           history: messages,
-          diaryContext: contextToSend
+          diaryContext: combinedContext
         }),
         signal: abortController.signal
       });
@@ -428,17 +436,72 @@
   // Initialize greeting on mount
   onMount(() => {
     loadCurrentSession();
+    suggestedPromptCategory = metricsCollector.getSuggestedPromptCategory();
   });
 
   function getInitialGreeting() {
     const hour = new Date().getHours();
     const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    return `${timeGreeting}! 💙 This is a space for you to explore your thoughts and feelings. I'll listen and reflect with you as you process your experiences, especially when you're feeling isolated, homesick, or far from your support system. What would you like to explore today?`;
+    return `${timeGreeting}! ðŸ’™ This is a space for you to explore your thoughts and feelings. I'll listen and reflect with you as you process your experiences, especially when you're feeling isolated, homesick, or far from your support system. What would you like to explore today?`;
+  }
+
+  async function summarizeChatToDiary() {
+    if (!messages || messages.length === 0 || summarySaving) return;
+    summarySaving = true;
+    summaryMessage = '';
+    try {
+      const targetDate = selectedEntryDate || diaryStore.formatDate();
+      const res = await fetch('/api/diary-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history: messages, date: targetDate })
+      });
+      if (!res.ok) {
+        summaryMessage = 'Could not summarize right now.';
+        return;
+      }
+      const data = await res.json();
+      if (data?.summary) {
+        const existing = diaryStore.getEntry(targetDate);
+        const newContent = existing
+          ? `${existing.trim()}\n\n---\n\nChat summary:\n${data.summary.trim()}`
+          : `Chat summary:\n${data.summary.trim()}`;
+        diaryStore.saveEntry(targetDate, newContent);
+        summaryMessage = 'Saved a chat summary to your diary.';
+      }
+    } catch (err) {
+      console.error('Summarize error:', err);
+      summaryMessage = 'Could not summarize right now.';
+    } finally {
+      summarySaving = false;
+    }
   }
   
   function handlePromptSelected(prompt) {
     input = prompt;
     // Optionally auto-send, but better to let user edit
+  }
+
+  async function extractEventsFromText(text) {
+    // Skip if user marks as private in-line
+    if (!text || text.toLowerCase().includes('[private]')) return;
+    pendingEventCheck = true;
+    try {
+      const res = await fetch('/api/extract-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.events?.length) {
+        eventStore.addEvents(data.events);
+      }
+    } catch (err) {
+      console.error('event extraction error', err);
+    } finally {
+      pendingEventCheck = false;
+    }
   }
   
   function handleCategoryChange(category) {
@@ -453,10 +516,10 @@
   }
 
   function getModeIcon(mode) {
-    if (mode === 'reflection') return '💭';
-    if (mode === 'validator') return '💚';
-    if (mode === 'conflict') return '🤝';
-    return '💙';
+    if (mode === 'reflection') return 'ðŸ’­';
+    if (mode === 'validator') return 'ðŸ’š';
+    if (mode === 'conflict') return 'ðŸ¤';
+    return 'ðŸ’™';
   }
 
   async function send() {
@@ -470,6 +533,7 @@
       id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     };
     messages = [...messages, userMessage];
+    extractEventsFromText(content);
     
     // Persist user message immediately
     if (currentSessionId) {
@@ -493,13 +557,20 @@
           ? `${contextToSend}\n\n---\n\n${todayEntryContext}`
           : todayEntryContext;
       }
+      const peopleContext = peopleStore.getContextForAgents();
+      const eventsContext = eventStore.getTodayContext();
+      const combinedContext = [
+        contextToSend,
+        peopleContext || '',
+        eventsContext || ''
+      ].filter(Boolean).join('\n\n---\n\n');
 
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           history: messages,
-          diaryContext: contextToSend
+          diaryContext: combinedContext
           // Mode is determined automatically by orchestrator based on metrics
         }),
         signal: abortController.signal
@@ -606,6 +677,14 @@
         >
           📥 Import Diary
         </button>
+        <button 
+          class="import-diary-btn"
+          on:click={summarizeChatToDiary}
+          title="Save a concise summary of this chat to your diary"
+          disabled={summarySaving}
+        >
+          📝 Save Chat to Diary
+        </button>
         {#if diaryContext || includeTodayEntry}
           <button 
             class="diary-context-btn"
@@ -623,6 +702,11 @@
   {#if errorMsg}
     <div class="error" role="alert">
       {errorMsg}
+    </div>
+  {/if}
+  {#if summaryMessage}
+    <div class="info success">
+      {summaryMessage}
     </div>
   {/if}
 
@@ -665,14 +749,14 @@
                     on:click={(e) => confirmDeleteSession(session.id, e)}
                     title="Confirm delete"
                   >
-                    ✓
+                    âœ“
                   </button>
                   <button 
                     class="cancel-delete-btn"
                     on:click={(e) => cancelDelete(e)}
                     title="Cancel"
                   >
-                    ✕
+                    âœ•
                   </button>
                 </div>
               {:else}
@@ -681,7 +765,7 @@
                   on:click={(e) => startDeleteSession(session.id, e)}
                   title="Delete this chat"
                 >
-                  🗑️
+                  ðŸ—‘ï¸
                 </button>
               {/if}
             </div>
@@ -699,8 +783,8 @@
     <div class="diary-context-modal">
       <div class="diary-context-modal-content">
         <div class="context-modal-header">
-          <h3>📝 Diary Context</h3>
-          <button class="close-context-modal" on:click={() => showDiaryContext = false} type="button">×</button>
+          <h3>ðŸ“ Diary Context</h3>
+          <button class="close-context-modal" on:click={() => showDiaryContext = false} type="button">?</button>
         </div>
         <div class="context-modal-body">
           {#if diaryContext}
@@ -730,8 +814,8 @@
     <div class="import-diary-modal">
       <div class="import-diary-content">
         <div class="import-header">
-          <h3>📖 Import Diary Entry</h3>
-          <button class="close-import" on:click={toggleImportDiary} type="button">×</button>
+          <h3>?? Import Diary Entry</h3>
+          <button class="close-import" on:click={toggleImportDiary} type="button">?</button>
         </div>
         <div class="entries-list">
           {#if availableEntries.length > 0}
@@ -781,19 +865,33 @@
     {/if}
   </div>
 
-      <div class="chat-input-container">
+  <div class="chat-input-container">
+        <div class="prompt-hint">
+          {#if suggestedPromptCategory === 'homesickness'}
+            Suggested prompts: Homesickness (based on recent writing).
+          {:else if suggestedPromptCategory === 'relationships'}
+            Suggested prompts: Relationships (based on recent writing).
+          {:else if suggestedPromptCategory === 'challenges'}
+            Suggested prompts: Challenges (based on recent writing).
+          {:else if suggestedPromptCategory === 'reflection'}
+            Suggested prompts: Deep Reflection (based on recent writing).
+          {:else}
+            Choose a prompt or just start typing to begin.
+          {/if}
+        </div>
         <JournalPrompts 
           onSelectPrompt={handlePromptSelected} 
           bind:selectedCategory={selectedCategory}
           onCategoryChange={handleCategoryChange}
-          showLabels={true}
+          showLabels={false}
+          suggestedCategory={suggestedPromptCategory}
         />
         <div class="input-wrapper">
           <input
             type="text"
             bind:value={input}
             on:keydown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
-            placeholder="Share what's on your heart... 💙"
+            placeholder="Share what's on your heart... ðŸ’™"
             class="chat-input"
             disabled={isLoading}
           />
@@ -910,6 +1008,9 @@
     font-size: 0.9rem;
     transition: all 0.2s ease;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
   }
 
   .import-diary-btn:hover {
@@ -1206,6 +1307,15 @@
     border-radius: 8px;
   }
 
+  .info.success {
+    background: #ecfdf3;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+    padding: 0.75rem 1rem;
+    margin: 0 1rem 1rem 1rem;
+    border-radius: 8px;
+  }
+
   .chat-messages {
     flex: 1;
     overflow-y: auto;
@@ -1300,6 +1410,13 @@
     padding: 1rem;
     border-top: 2px solid rgba(139, 115, 85, 0.15);
     background: linear-gradient(135deg, rgba(255, 248, 240, 0.8) 0%, rgba(255, 245, 230, 0.8) 100%);
+  }
+
+  .prompt-hint {
+    font-size: 0.85rem;
+    color: rgba(74, 55, 40, 0.75);
+    font-weight: 500;
+    letter-spacing: 0.01em;
   }
 
   .input-wrapper {
@@ -1573,4 +1690,7 @@
     font-style: italic;
   }
 </style>
+
+
+
 
