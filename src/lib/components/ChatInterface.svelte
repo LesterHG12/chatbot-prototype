@@ -800,7 +800,7 @@
       <div class="diary-context-modal-content">
         <div class="context-modal-header">
           <h3>📝 Diary Context</h3>
-          <button class="close-context-modal" on:click={() => showDiaryContext = false} type="button">?</button>
+          <button class="close-context-modal" on:click={() => showDiaryContext = false} type="button" aria-label="Close diary context">×</button>
         </div>
         <div class="context-modal-body">
           {#if diaryContext}

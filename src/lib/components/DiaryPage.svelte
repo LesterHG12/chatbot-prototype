@@ -35,6 +35,7 @@
   let leftLastSavedAt = null;
   let rightLastSavedAt = null;
   let nameSuggestions = [];
+  let suggestionsDismissed = false;
   let showPromptsTray = false;
   let showPrivacyReminder = false;
   let suggestedPromptCategory = 'daily';
@@ -401,6 +402,15 @@
     nameSuggestions = uniqueNames.filter(
       (n) => !existingReminders.includes(n.toLowerCase()) && !existingProfiles.includes(n.toLowerCase())
     );
+
+    // If no suggestions remain, re-enable the bar for future names
+    if (nameSuggestions.length === 0) {
+      suggestionsDismissed = false;
+    }
+  }
+
+  function dismissNameSuggestions() {
+    suggestionsDismissed = true;
   }
 
   function addPersonFromDiary(name) {
@@ -582,7 +592,7 @@
     </button>
   </div>
 
-  {#if nameSuggestions.length > 0}
+  {#if nameSuggestions.length > 0 && !suggestionsDismissed}
     <div class="people-suggestion-bar">
       <span class="suggestion-label">Stay Connected:</span>
       {#each nameSuggestions as name}
@@ -590,6 +600,14 @@
           Add {name}
         </button>
       {/each}
+      <button 
+        class="suggestion-dismiss" 
+        on:click={() => dismissNameSuggestions()} 
+        type="button"
+        aria-label="Hide person suggestions"
+      >
+        Close
+      </button>
     </div>
   {/if}
 
@@ -925,6 +943,23 @@
     background: rgba(139, 115, 85, 0.15);
     border-color: rgba(139, 115, 85, 0.5);
     transform: translateY(-1px);
+  }
+
+  .suggestion-dismiss {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: #4a3728;
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.35rem 0.75rem;
+    border-radius: 8px;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+
+  .suggestion-dismiss:hover {
+    background: rgba(139, 115, 85, 0.1);
+    color: #6b5743;
   }
 
   .calendar-toggle-top {
