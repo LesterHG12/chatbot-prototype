@@ -442,7 +442,7 @@
   function getInitialGreeting() {
     const hour = new Date().getHours();
     const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    return `${timeGreeting}! ðŸ’™ This is a space for you to explore your thoughts and feelings. I'll listen and reflect with you as you process your experiences, especially when you're feeling isolated, homesick, or far from your support system. What would you like to explore today?`;
+    return `${timeGreeting}! 💖 This is a space for you to explore your thoughts and feelings. I'll listen and reflect with you as you process your experiences, especially when you're feeling isolated, homesick, or far from your support system. What would you like to explore today?`;
   }
 
   async function summarizeChatToDiary() {
@@ -516,10 +516,10 @@
   }
 
   function getModeIcon(mode) {
-    if (mode === 'reflection') return 'ðŸ’­';
-    if (mode === 'validator') return 'ðŸ’š';
-    if (mode === 'conflict') return 'ðŸ¤';
-    return 'ðŸ’™';
+    if (mode === 'reflection') return '💭';
+    if (mode === 'validator') return '💚';
+    if (mode === 'conflict') return '🤝';
+    return '💖';
   }
 
   async function send() {
@@ -749,14 +749,14 @@
                     on:click={(e) => confirmDeleteSession(session.id, e)}
                     title="Confirm delete"
                   >
-                    âœ“
+                    ✓
                   </button>
                   <button 
                     class="cancel-delete-btn"
                     on:click={(e) => cancelDelete(e)}
                     title="Cancel"
                   >
-                    âœ•
+                    ✕
                   </button>
                 </div>
               {:else}
@@ -765,7 +765,7 @@
                   on:click={(e) => startDeleteSession(session.id, e)}
                   title="Delete this chat"
                 >
-                  ðŸ—‘ï¸
+                  🗑️
                 </button>
               {/if}
             </div>
@@ -783,7 +783,7 @@
     <div class="diary-context-modal">
       <div class="diary-context-modal-content">
         <div class="context-modal-header">
-          <h3>ðŸ“ Diary Context</h3>
+          <h3>📝 Diary Context</h3>
           <button class="close-context-modal" on:click={() => showDiaryContext = false} type="button">?</button>
         </div>
         <div class="context-modal-body">
@@ -814,7 +814,7 @@
     <div class="import-diary-modal">
       <div class="import-diary-content">
         <div class="import-header">
-          <h3>?? Import Diary Entry</h3>
+            <h3>📥 Import Diary Entry</h3>
           <button class="close-import" on:click={toggleImportDiary} type="button">?</button>
         </div>
         <div class="entries-list">
@@ -891,7 +891,7 @@
             type="text"
             bind:value={input}
             on:keydown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
-            placeholder="Share what's on your heart... ðŸ’™"
+            placeholder="Share what's on your heart... 💖"
             class="chat-input"
             disabled={isLoading}
           />
