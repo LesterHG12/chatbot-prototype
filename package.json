@@ -12,7 +12,7 @@
     "node": ">=20.x"
   },
   "devDependencies": {
-    "@sveltejs/adapter-vercel": "^5.3.1",
+    "@sveltejs/adapter-vercel": "^5.10.3",
     "@sveltejs/kit": "2.5.10",
     "@sveltejs/vite-plugin-svelte": "^3.0.2",
     "svelte": "^4.2.18",
@@ -22,4 +22,3 @@
     "@google/genai": "^0.2.0"
   }
 }
-
