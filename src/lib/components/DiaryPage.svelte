@@ -355,9 +355,9 @@
     }
     // Trigger save
     handleTextChange();
-    // Focus the textarea
+    // Focus the left textarea
     setTimeout(() => {
-      const textarea = document.querySelector('.entry-textarea');
+      const textarea = document.querySelector('.entry-textarea.left');
       if (textarea) textarea.focus();
     }, 100);
   }
@@ -371,10 +371,10 @@
     }
     // Trigger save
     handleNextEntryChange();
-    // Focus the textarea
+    // Focus the right textarea
     setTimeout(() => {
-      const textareas = document.querySelectorAll('.entry-textarea');
-      if (textareas && textareas.length > 1) textareas[1].focus();
+      const textarea = document.querySelector('.entry-textarea.right');
+      if (textarea) textarea.focus();
     }, 100);
   }
 
@@ -382,9 +382,18 @@
     selectedCategory = category;
   }
 
+  function handleFocus(side) {
+    lastFocusedSide = side;
+  }
+
   function handleRandomPrompt() {
     const randomPrompt = getRandomPrompt();
-    handlePromptSelected(randomPrompt);
+    // Add prompt to the side that was last focused
+    if (lastFocusedSide === 'right') {
+      handleNextPromptSelected(randomPrompt);
+    } else {
+      handlePromptSelected(randomPrompt);
+    }
   }
 
 
@@ -437,7 +446,14 @@
   <!-- Single prompts component for both pages -->
   <div class="global-prompts-container">
     <JournalPrompts 
-      onSelectPrompt={(prompt) => handlePromptSelected(prompt)}
+      onSelectPrompt={(prompt) => {
+        // Add prompt to the side that was last focused
+        if (lastFocusedSide === 'right') {
+          handleNextPromptSelected(prompt);
+        } else {
+          handlePromptSelected(prompt);
+        }
+      }}
       bind:selectedCategory={selectedCategory}
       onCategoryChange={handleCategoryChange}
       showLabels={false}
