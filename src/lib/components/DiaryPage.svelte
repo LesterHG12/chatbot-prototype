@@ -35,6 +35,7 @@
   let leftLastSavedAt = null;
   let rightLastSavedAt = null;
   let nameSuggestions = [];
+  let nameSuggestionRequestId = 0;
   let suggestionsDismissed = false;
   let showPromptsTray = false;
   let showPrivacyReminder = false;
@@ -399,12 +400,71 @@
     return target.substring(0, 220);
   }
 
-  function updateNameSuggestions() {
-    const names = [
+  async function fetchNamesWithAgent(text) {
+    try {
+      const res = await fetch('/api/extract-names', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.names) ? data.names : [];
+    } catch (err) {
+      console.error('Name agent error:', err);
+      return [];
+    }
+  }
+
+  function splitCandidates(candidate) {
+    if (!candidate || typeof candidate !== 'string') return [];
+    return candidate
+      .split(/[.,;]+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+  }
+
+  function isLikelyName(name) {
+    if (!name || typeof name !== 'string') return false;
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+    if (trimmed.length > 40) return false;
+    // Allow one or two words, letters plus hyphen/apostrophe
+    if (!/^[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*)?$/.test(trimmed)) return false;
+    const lower = trimmed.toLowerCase();
+    const stopWords = new Set([
+      'holidays','holiday','merry','christmas','hello','hi','hey','thanks','thank you',
+      'happy','birthday','new year','easter','thanksgiving','hanukkah','diwali','eid'
+    ]);
+    if (stopWords.has(lower)) return false;
+    return true;
+  }
+
+  async function updateNameSuggestions() {
+    const requestId = ++nameSuggestionRequestId;
+    const fallbackNames = [
       ...extractNamesFromText(entryText),
       ...extractNamesFromText(nextEntryText)
     ];
-    const uniqueNames = Array.from(new Set(names.map((n) => n.trim()))).filter(Boolean);
+
+    let agentNames = [];
+    const combined = `${entryText}\n\n${nextEntryText}`.trim();
+    if (combined.length > 0) {
+      agentNames = await fetchNamesWithAgent(combined);
+    }
+
+    // Drop stale responses
+    if (requestId !== nameSuggestionRequestId) return;
+
+    const names = [
+      ...fallbackNames,
+      ...agentNames.flatMap((n) => splitCandidates(n))
+    ];
+    const uniqueNames = Array.from(new Set(
+      names
+        .map((n) => (typeof n === 'string' ? n.trim() : ''))
+        .filter(isLikelyName)
+    ));
     const existingReminders = getStoredReminders().map((r) => r.name.toLowerCase());
     const existingProfiles = peopleStore.listNames().map((n) => n.toLowerCase());
     nameSuggestions = uniqueNames.filter(
@@ -418,6 +478,18 @@
   }
 
   function dismissNameSuggestions() {
+    suggestionsDismissed = true;
+  }
+
+  function dismissSuggestion(name) {
+    nameSuggestions = nameSuggestions.filter((n) => n !== name);
+    if (nameSuggestions.length === 0) {
+      suggestionsDismissed = true;
+    }
+  }
+
+  function dismissAllSuggestions() {
+    nameSuggestions = [];
     suggestionsDismissed = true;
   }
 
@@ -604,17 +676,27 @@
     <div class="people-suggestion-bar">
       <span class="suggestion-label">Stay Connected:</span>
       {#each nameSuggestions as name}
-        <button class="suggestion-chip" on:click={() => addPersonFromDiary(name)} type="button">
-          Add {name}
-        </button>
+        <div class="suggestion-chip">
+          <button class="suggestion-add" on:click={() => addPersonFromDiary(name)} type="button">
+            Add {name}
+          </button>
+          <button 
+            class="suggestion-chip-dismiss" 
+            on:click={() => dismissSuggestion(name)} 
+            type="button"
+            aria-label={`Dismiss ${name}`}
+          >
+            ×
+          </button>
+        </div>
       {/each}
       <button 
         class="suggestion-dismiss" 
-        on:click={() => dismissNameSuggestions()} 
+        on:click={dismissAllSuggestions} 
         type="button"
         aria-label="Hide person suggestions"
       >
-        Close
+        ×
       </button>
     </div>
   {/if}
@@ -937,20 +1019,46 @@
   }
 
   .suggestion-chip {
+    display: inline-flex;
+    align-items: center;
     border: 1px solid rgba(139, 115, 85, 0.3);
     background: rgba(139, 115, 85, 0.08);
     border-radius: 999px;
-    padding: 0.35rem 0.75rem;
+    padding: 0.2rem 0.35rem 0.2rem 0.25rem;
+    gap: 0.25rem;
+  }
+
+  .suggestion-add {
+    border: none;
+    background: transparent;
+    padding: 0.25rem 0.6rem;
     font-size: 0.85rem;
     cursor: pointer;
     color: #4a3728;
+    border-radius: 999px;
     transition: all 0.2s ease;
   }
 
-  .suggestion-chip:hover {
+  .suggestion-add:hover {
     background: rgba(139, 115, 85, 0.15);
-    border-color: rgba(139, 115, 85, 0.5);
     transform: translateY(-1px);
+  }
+
+  .suggestion-chip-dismiss {
+    border: none;
+    background: transparent;
+    color: #6b5743;
+    cursor: pointer;
+    padding: 0.1rem 0.4rem;
+    border-radius: 50%;
+    font-weight: 700;
+    line-height: 1;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+
+  .suggestion-chip-dismiss:hover {
+    background: rgba(139, 115, 85, 0.12);
+    color: #4a3728;
   }
 
   .suggestion-dismiss {
