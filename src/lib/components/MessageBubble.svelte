@@ -5,6 +5,18 @@
   export let mode = 'reflection'; // 'reflection', 'validator', or 'conflict'
   
   const dispatch = createEventDispatcher();
+
+  // Fix previously stored UTF-8 bytes that were decoded as Latin-1.
+  const normalizeContent = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    return text
+      .replaceAll('ðŸ’™', '💙')
+      .replaceAll('ðŸ’­', '💭')
+      .replaceAll('ðŸ’š', '💚')
+      .replaceAll('ðŸ¤', '🤝')
+      .replaceAll('ðŸ—‘ï¸', '🗑️')
+      .replaceAll('ðŸ“', '📝');
+  };
   
   let isVisible = false;
   let feedbackGiven = null; // 'helpful' or 'not-helpful'
@@ -32,7 +44,7 @@
 <div class="bubble-container" class:assistant={message.role === 'assistant'} class:user={message.role === 'user'}>
   {#if message.role === 'user'}
     <div class="bubble user">
-      {message.content}
+      {normalizeContent(message.content)}
     </div>
   {:else}
     <div 
@@ -42,7 +54,7 @@
       class:conflict-mode={mode === 'conflict'}
       class:visible={isVisible}
     >
-      {message.content}
+      {normalizeContent(message.content)}
       <div class="feedback-buttons">
         <button
           class="feedback-btn"

@@ -439,6 +439,18 @@
     suggestedPromptCategory = metricsCollector.getSuggestedPromptCategory();
   });
 
+  // Normalize any previously stored emoji that were mis-decoded
+  function normalizeContent(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text
+      .replaceAll('ðŸ’™', '💙')
+      .replaceAll('ðŸ’­', '💭')
+      .replaceAll('ðŸ’š', '💚')
+      .replaceAll('ðŸ¤', '🤝')
+      .replaceAll('ðŸ—‘ï¸', '🗑️')
+      .replaceAll('ðŸ“', '📝');
+  }
+
   function getInitialGreeting() {
     const hour = new Date().getHours();
     const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -732,7 +744,11 @@
                   {#if session.messages && session.messages.length > 0}
                     {@const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user')}
                     {#if lastUserMsg}
+                    {#if normalizeContent(lastUserMsg.content)}
+                      {normalizeContent(lastUserMsg.content).substring(0, 60)}{normalizeContent(lastUserMsg.content).length > 60 ? '...' : ''}
+                    {:else}
                       {lastUserMsg.content.substring(0, 60)}{lastUserMsg.content.length > 60 ? '...' : ''}
+                    {/if}
                     {:else}
                       {session.messages.length} message{session.messages.length !== 1 ? 's' : ''}
                     {/if}
@@ -829,7 +845,13 @@
                   type="button"
                 >
                   <div class="entry-date">{entry.display}</div>
-                  <div class="entry-preview">{entry.content.substring(0, 100)}{entry.content.length > 100 ? '...' : ''}</div>
+                  <div class="entry-preview">
+                    {#if normalizeContent(entry.content)}
+                      {normalizeContent(entry.content).substring(0, 100)}{normalizeContent(entry.content).length > 100 ? '...' : ''}
+                    {:else}
+                      {entry.content.substring(0, 100)}{entry.content.length > 100 ? '...' : ''}
+                    {/if}
+                  </div>
                 </button>
               {/each}
             </div>
