@@ -326,9 +326,17 @@
     }
   }
 
+  function toLocalDate(dateString) {
+    if (!dateString) return null;
+    const [year, month, day] = dateString.split('-').map(Number);
+    // Use local time constructor to avoid UTC offset shifting the day
+    return new Date(year, month - 1, day);
+  }
+
   function calculateDaysSinceDate(dateString) {
     if (!dateString) return 999;
-    const date = new Date(dateString + 'T00:00:00');
+    const date = toLocalDate(dateString);
+    if (!date) return 999;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diff = today - date;

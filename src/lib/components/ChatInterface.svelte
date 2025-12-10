@@ -56,15 +56,23 @@
     }));
   }
 
+  function toLocalDate(dateString) {
+    if (!dateString) return null;
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day); // local midnight
+  }
+
   function formatDateDisplay(dateString) {
-    const date = new Date(dateString + 'T00:00:00');
+    const date = toLocalDate(dateString);
+    if (!date) return dateString;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const entryDate = new Date(date);
     entryDate.setHours(0, 0, 0, 0);
     
     const diffTime = today - entryDate;
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const diffDays = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
     
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
@@ -831,7 +839,14 @@
       <div class="import-diary-content">
         <div class="import-header">
             <h3>📥 Import Diary Entry</h3>
-          <button class="close-import" on:click={toggleImportDiary} type="button">?</button>
+          <button 
+            class="close-import" 
+            on:click={toggleImportDiary} 
+            type="button"
+            aria-label="Close import diary"
+          >
+            ×
+          </button>
         </div>
         <div class="entries-list">
           {#if availableEntries.length > 0}

@@ -83,9 +83,16 @@
     saveReminders();
   }
 
+  function toLocalDate(dateString) {
+    if (!dateString) return null;
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day); // local midnight, no UTC shift
+  }
+
   function calculateDaysSince(dateString) {
     if (!dateString) return 999;
-    const date = new Date(dateString + 'T00:00:00');
+    const date = toLocalDate(dateString);
+    if (!date) return 999;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diffTime = today - date;
