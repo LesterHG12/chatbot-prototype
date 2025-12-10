@@ -334,6 +334,13 @@
     return new Date(year, month - 1, day);
   }
 
+  const RELATIONSHIP_TERMS = [
+    'mom','dad','mother','father','grandma','grandpa','grandmother','grandfather',
+    'sister','brother','aunt','uncle','cousin','wife','husband','partner',
+    'boyfriend','girlfriend','fiance','fiancee','stepmom','stepdad','stepmother',
+    'stepfather','stepsister','stepbrother','son','daughter'
+  ];
+
   function calculateDaysSinceDate(dateString) {
     if (!dateString) return 999;
     const date = toLocalDate(dateString);
@@ -400,6 +407,13 @@
     return target.substring(0, 220);
   }
 
+  function getMentionDate(name) {
+    if (!name) return diaryStore.formatDate();
+    if (entryText.includes(name)) return selectedDate;
+    if (nextEntryText.includes(name)) return nextDate;
+    return diaryStore.formatDate();
+  }
+
   async function fetchNamesWithAgent(text) {
     try {
       const res = await fetch('/api/extract-names', {
@@ -416,6 +430,42 @@
     }
   }
 
+  async function fetchContactSignals(text, candidates = []) {
+    try {
+      const res = await fetch('/api/extract-contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, candidates })
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.contacts) ? data.contacts : [];
+    } catch (err) {
+      console.error('Contact agent error:', err);
+      return [];
+    }
+  }
+
+  function setReminderLastContact(name, dateString) {
+    if (!name || !dateString) return;
+    const reminders = getStoredReminders();
+    const idx = reminders.findIndex((r) => r.name.toLowerCase() === name.toLowerCase());
+    if (idx === -1) {
+      reminders.push({
+        id: Date.now(),
+        name: name.trim(),
+        type: 'friend',
+        emoji: '🤝',
+        daysSince: calculateDaysSinceDate(dateString),
+        lastContact: dateString
+      });
+    } else {
+      reminders[idx].lastContact = dateString;
+      reminders[idx].daysSince = calculateDaysSinceDate(dateString);
+    }
+    saveReminders(reminders);
+  }
+
   function splitCandidates(candidate) {
     if (!candidate || typeof candidate !== 'string') return [];
     return candidate
@@ -424,11 +474,28 @@
       .filter(Boolean);
   }
 
+  function extractRelationshipNames(text) {
+    if (!text) return [];
+    const regex = new RegExp(`\\b(${RELATIONSHIP_TERMS.join('|')})\\b`, 'gi');
+    const matches = [];
+    let m;
+    while ((m = regex.exec(text)) !== null) {
+      const term = m[1];
+      if (term) {
+        const normalized = term.charAt(0).toUpperCase() + term.slice(1).toLowerCase();
+        matches.push(normalized);
+      }
+    }
+    return Array.from(new Set(matches));
+  }
+
   function isLikelyName(name) {
     if (!name || typeof name !== 'string') return false;
     const trimmed = name.trim();
     if (!trimmed) return false;
     if (trimmed.length > 40) return false;
+    const lowerTrimmed = trimmed.toLowerCase();
+    if (RELATIONSHIP_TERMS.includes(lowerTrimmed)) return true;
     // Allow one or two words, letters plus hyphen/apostrophe
     if (!/^[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*)?$/.test(trimmed)) return false;
     const lower = trimmed.toLowerCase();
@@ -456,9 +523,12 @@
     // Drop stale responses
     if (requestId !== nameSuggestionRequestId) return;
 
+    const relationshipNames = extractRelationshipNames(combined);
+
     const names = [
       ...fallbackNames,
-      ...agentNames.flatMap((n) => splitCandidates(n))
+      ...agentNames.flatMap((n) => splitCandidates(n)),
+      ...relationshipNames
     ];
     const uniqueNames = Array.from(new Set(
       names
@@ -470,6 +540,20 @@
     nameSuggestions = uniqueNames.filter(
       (n) => !existingReminders.includes(n.toLowerCase()) && !existingProfiles.includes(n.toLowerCase())
     );
+
+    // Update last-contact signals using agent assessment of contact
+    if (combined.length > 0 && nameSuggestions.length > 0) {
+      const contactSignals = await fetchContactSignals(combined, nameSuggestions);
+      // Drop if stale
+      if (requestId === nameSuggestionRequestId && Array.isArray(contactSignals)) {
+        contactSignals.forEach(({ name, contacted }) => {
+          if (contacted && name) {
+            const date = getMentionDate(name);
+            setReminderLastContact(name, date);
+          }
+        });
+      }
+    }
 
     // If no suggestions remain, re-enable the bar for future names
     if (nameSuggestions.length === 0) {
